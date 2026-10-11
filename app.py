@@ -19,8 +19,39 @@ from sklearn.metrics import (accuracy_score, confusion_matrix, f1_score,
 
 import features
 
-BLUE, ORANGE = "#2a78d6", "#eb6834"
+BLUE, ORANGE, AQUA = "#2a78d6", "#eb6834", "#1baf7a"
 SURFACE, INK, MUTED, GRID = "#fcfcfb", "#0b0b0b", "#52514e", "#e8e8e5"
+
+# Algorithms are coloured by family, not by rank, so a model keeps its colour
+# when the ranking metric changes or the selection narrows. Three families is
+# the ceiling: a fourth hue fails the all-pairs colourblind gate against one of
+# these three, and the scatter below needs every pair to be distinguishable.
+FAMILY = {
+    "Linear Regression": "Linear & probabilistic",
+    "Ridge": "Linear & probabilistic",
+    "Lasso": "Linear & probabilistic",
+    "ElasticNet": "Linear & probabilistic",
+    "Polynomial Ridge": "Linear & probabilistic",
+    "Logistic Regression": "Linear & probabilistic",
+    "Gaussian Naive Bayes": "Linear & probabilistic",
+    "Decision Tree": "Tree & ensemble",
+    "Random Forest": "Tree & ensemble",
+    "Hist Gradient Boosting": "Tree & ensemble",
+    # the two notebooks spell the neighbours model differently
+    "K-Nearest Neighbours": "Instance & kernel",
+    "K-Nearest Neighbors": "Instance & kernel",
+    "Support Vector Regression": "Instance & kernel",
+    "Support Vector Machine": "Instance & kernel",
+}
+FAMILY_ORDER = ["Linear & probabilistic", "Tree & ensemble",
+                "Instance & kernel", "Other"]
+FAMILY_RANGE = [BLUE, ORANGE, AQUA, MUTED]
+
+
+def family_color():
+    return alt.Color("family:N", title=None,
+                     scale=alt.Scale(domain=FAMILY_ORDER, range=FAMILY_RANGE),
+                     legend=alt.Legend(orient="top", direction="horizontal"))
 
 MODELS = Path(__file__).parent / "models"
 
@@ -60,22 +91,34 @@ def style(chart, height):
             .configure_title(color=INK, fontSize=14, anchor="start"))
 
 
-def ranked_bars(df, metric, higher_is_better, fmt=".3f", unit=""):
-    """One metric, every model, sorted best to worst. Single series, so the
-    title carries identity and each bar is directly labelled."""
+def tidy(df):
+    """Index to a `model` column, plus the family that drives its colour."""
     d = df.reset_index().rename(columns={df.index.name or "index": "model"})
+    d["family"] = d["model"].map(FAMILY).fillna("Other")
+    return d
+
+
+def ranked_bars(df, metric, higher_is_better, fmt=".3f", unit="",
+                by_family=True):
+    """One metric, every model, sorted best to worst, coloured by family.
+    Each bar is directly labelled, which is also the relief the aqua family
+    needs to clear the contrast gate on a light surface."""
+    d = tidy(df)
     base = alt.Chart(d).encode(
         x=alt.X(f"{metric}:Q", title=f"{metric}{unit}",
                 scale=alt.Scale(nice=True)),
         y=alt.Y("model:N", sort=alt.EncodingSortField(metric, order="descending"
                 if higher_is_better else "ascending"), title=None),
         tooltip=[alt.Tooltip("model:N", title="Model"),
+                 alt.Tooltip("family:N", title="Family"),
                  alt.Tooltip(f"{metric}:Q", format=fmt)],
     )
-    bars = base.mark_bar(cornerRadiusEnd=4, color=BLUE, height=18)
+    bars = base.mark_bar(cornerRadiusEnd=4, height=18)
+    bars = (bars.encode(color=family_color()) if by_family
+            else bars.encode(color=alt.value(BLUE)))
     labels = base.mark_text(align="left", dx=6, color=MUTED, fontSize=11).encode(
         text=alt.Text(f"{metric}:Q", format=fmt))
-    return style(bars + labels, 30 * len(d) + 60)
+    return style(bars + labels, 30 * len(d) + 70)
 
 
 def paired_bars(df, left, right, value_title, names=("default", "tuned")):
@@ -101,18 +144,20 @@ def paired_bars(df, left, right, value_title, names=("default", "tuned")):
 
 
 def cost_scatter(df, metric, time_col="fit (s)"):
-    """Score against what it cost to fit. One hue, labelled points: ten
-    categorical colours here would be unreadable and CVD-unsafe."""
-    d = df.reset_index().rename(columns={df.index.name or "index": "model"})
+    """Score against what it cost to fit, coloured by family. Three hues, not
+    ten: every pair in a scatter has to be distinguishable, and the all-pairs
+    colourblind gate only clears at three."""
+    d = tidy(df)
     base = alt.Chart(d).encode(
         x=alt.X(f"{time_col}:Q", title="Fit time (seconds, log scale)",
                 scale=alt.Scale(type="log", nice=False)),
         y=alt.Y(f"{metric}:Q", title=metric, scale=alt.Scale(zero=False)),
-        tooltip=["model:N", alt.Tooltip(f"{metric}:Q", format=".4f"),
+        tooltip=["model:N", alt.Tooltip("family:N", title="Family"),
+                 alt.Tooltip(f"{metric}:Q", format=".4f"),
                  alt.Tooltip(f"{time_col}:Q", format=".2f", title="fit (s)")],
     )
-    points = base.mark_point(filled=True, size=130, color=BLUE,
-                             stroke=SURFACE, strokeWidth=2)
+    points = base.mark_point(filled=True, size=160, stroke=SURFACE,
+                             strokeWidth=2).encode(color=family_color())
     labels = base.mark_text(align="left", dx=10, dy=-6, color=MUTED,
                             fontSize=11).encode(text="model:N")
     return style(points + labels, 420)
@@ -121,30 +166,53 @@ def cost_scatter(df, metric, time_col="fit (s)"):
 def cv_bars(df, mean_col, std_col):
     """Cross-validated mean with a +/- 2 sd interval, so a lead inside the
     noise is visible as one."""
-    d = df.reset_index().rename(columns={df.index.name or "index": "model"})
+    d = tidy(df)
     d["lo"] = d[mean_col] - 2 * d[std_col]
     d["hi"] = d[mean_col] + 2 * d[std_col]
     y = alt.Y("model:N", sort=alt.EncodingSortField(mean_col, order="descending"),
               title=None)
-    bars = alt.Chart(d).mark_bar(cornerRadiusEnd=4, color=BLUE, height=18).encode(
+    bars = alt.Chart(d).mark_bar(cornerRadiusEnd=4, height=18).encode(
         x=alt.X(f"{mean_col}:Q", title=f"{mean_col} (bars show +/- 2 sd)"),
-        y=y,
-        tooltip=["model:N", alt.Tooltip(f"{mean_col}:Q", format=".4f"),
+        y=y, color=family_color(),
+        tooltip=["model:N", alt.Tooltip("family:N", title="Family"),
+                 alt.Tooltip(f"{mean_col}:Q", format=".4f"),
                  alt.Tooltip(f"{std_col}:Q", format=".4f", title="sd")])
     rule = alt.Chart(d).mark_rule(color=INK, strokeWidth=1.5).encode(
         x="lo:Q", x2="hi:Q", y=y)
-    return style(bars + rule, 30 * len(d) + 60)
+    return style(bars + rule, 30 * len(d) + 70)
 
 
 def leaderboard(df, best_col, higher_is_better, headline, fmt="{:.4f}"):
-    """Winner as a stat row: the headline is a number, not a chart."""
-    best = df[best_col].idxmax() if higher_is_better else df[best_col].idxmin()
+    """Winner as a stat row: the headline is a number, not a chart. The
+    ranking metric also shows the gap to the runner-up, which is the thing
+    that tells you whether the lead is real."""
+    ranked = df[best_col].sort_values(ascending=not higher_is_better)
+    best = ranked.index[0]
+    runner = ranked.index[1] if len(ranked) > 1 else None
     row = df.loc[best]
-    st.caption(f"Best on {best_col}")
-    st.subheader(best)
+
+    family = FAMILY.get(best, "Other")
+    swatch = FAMILY_RANGE[FAMILY_ORDER.index(family)]
+    st.markdown(
+        f'<div style="font-size:.8rem;color:{MUTED};letter-spacing:.04em;'
+        f'text-transform:uppercase;">Best on {best_col}</div>'
+        f'<div style="font-size:1.55rem;font-weight:700;margin:.1rem 0 .1rem;">'
+        f'{best}</div>'
+        f'<div style="font-size:.85rem;color:{MUTED};">'
+        f'<span style="display:inline-block;width:.6rem;height:.6rem;'
+        f'border-radius:50%;background:{swatch};margin-right:.4rem;"></span>'
+        f'{family}</div>', unsafe_allow_html=True)
+    st.write("")
+
     cols = st.columns(len(headline))
     for col, name in zip(cols, headline):
-        col.metric(name, fmt.format(row[name]) if name in row else "n/a")
+        if name not in row:
+            col.metric(name, "n/a")
+            continue
+        delta = None
+        if runner is not None and name == best_col:
+            delta = f"{row[name] - df.loc[runner, name]:+.4f} vs {runner}"
+        col.metric(name, fmt.format(row[name]), delta=delta)
 
 
 def table_view(df, label="Full metric table"):
@@ -435,13 +503,15 @@ def operating_point():
 
 
 
-st.title("Capstone model comparison")
-st.caption("Metrics harvested from the notebook outputs. Nothing is retrained "
-           "here, so every control responds instantly.")
+st.title("Hotel Booking ML Capstone")
+st.caption("119,390 bookings · predict a nightly rate, score a cancellation, "
+           "and compare fifteen algorithms across three tracks")
 
-reg, clf, clu = st.tabs(["Regression - `adr`",
-                         "Classification - `is_canceled`",
-                         "Clustering"])
+FAMILY_NOTE = ("Bars and points are coloured by algorithm family, so a model "
+               "keeps its colour when you change the metric or narrow the "
+               "selection.")
+
+reg, clf, clu = st.tabs(["Regression", "Classification", "Clustering"])
 
 # ---------------------------------------------------------------- regression
 with reg:
@@ -454,9 +524,10 @@ with reg:
         st.warning("Run `python scripts/harvest_metrics.py` first.")
     else:
         st.header("How the ten algorithms compared")
-        leaderboard(models, "R2", True, ["R2", "RMSE", "MAE", "fit (s)"])
-        st.divider()
+        with st.container(border=True):
+            leaderboard(models, "R2", True, ["R2", "RMSE", "MAE", "fit (s)"])
 
+        st.caption(FAMILY_NOTE)
         shown = pick_models(models, "reg_pick")
         if shown is not None:
             chosen = shown.index.tolist()
@@ -464,20 +535,22 @@ with reg:
             REG_METRICS = {"R2": (True, ".3f", ""),
                            "RMSE": (False, ".1f", " (EUR)"),
                            "MAE": (False, ".1f", " (EUR)")}
-            metric = st.radio("Rank by", list(REG_METRICS), horizontal=True,
-                              key="reg_metric")
-            higher, fmt, unit = REG_METRICS[metric]
-            st.caption("Higher is better." if higher else "Lower is better.")
-            st.altair_chart(ranked_bars(shown, metric, higher, fmt, unit))
+            with st.container(border=True):
+                metric = st.radio("Rank by", list(REG_METRICS), horizontal=True,
+                                  key="reg_metric")
+                higher, fmt, unit = REG_METRICS[metric]
+                st.caption("Higher is better." if higher
+                           else "Lower is better.")
+                st.altair_chart(ranked_bars(shown, metric, higher, fmt, unit))
 
             left, right = st.columns(2)
-            with left:
+            with left, st.container(border=True):
                 st.subheader("Does it generalise?")
                 st.caption("Train R2 against test R2. A wide pair is "
                            "memorisation.")
                 st.altair_chart(paired_bars(shown, "train R2", "R2", "R2",
                                             names=("train", "test")))
-            with right:
+            with right, st.container(border=True):
                 st.subheader("Is the accuracy worth the compute?")
                 st.caption("Random Forest buys its lead with ~33x the fit "
                            "time of Hist Gradient Boosting.")
@@ -485,16 +558,18 @@ with reg:
 
             cv = restrict(load("regression_cv"), chosen)
             if cv is not None:
-                st.subheader("Does the ranking survive cross-validation?")
-                st.altair_chart(cv_bars(cv, "CV mean R2", "CV std"))
-                table_view(cv, "Cross-validation table")
+                with st.container(border=True):
+                    st.subheader("Does the ranking survive cross-validation?")
+                    st.altair_chart(cv_bars(cv, "CV mean R2", "CV std"))
+                    table_view(cv, "Cross-validation table")
 
             tuning = restrict(load("regression_tuning"), chosen)
             if tuning is not None:
-                st.subheader("What did tuning buy?")
-                st.altair_chart(paired_bars(tuning, "default R2", "tuned R2",
-                                            "Test R2"))
-                table_view(tuning, "Tuning table")
+                with st.container(border=True):
+                    st.subheader("What did tuning buy?")
+                    st.altair_chart(paired_bars(tuning, "default R2",
+                                                "tuned R2", "Test R2"))
+                    table_view(tuning, "Tuning table")
 
             table_view(shown)
 
@@ -504,7 +579,8 @@ with clf:
                  "Enter a booking and get its cancellation probability.")
     st.divider()
 
-    operating_point()
+    with st.container(border=True):
+        operating_point()
     st.divider()
 
     models = load("classification_models")
@@ -515,47 +591,56 @@ with clf:
         if timing is not None:
             models = models.join(timing[["fit (s)", "train rows"]])
         st.header("How the five algorithms compared")
-        leaderboard(models, "f1_weighted", True,
-                    ["accuracy", "f1_weighted", "roc_auc"])
-        st.divider()
+        with st.container(border=True):
+            leaderboard(models, "f1_weighted", True,
+                        ["accuracy", "f1_weighted", "roc_auc"])
 
+        st.caption(FAMILY_NOTE)
         shown = pick_models(models, "clf_pick")
         if shown is not None:
             chosen = shown.index.tolist()
 
             CLF_METRICS = ["f1_weighted", "accuracy", "roc_auc",
                            "precision_weighted", "recall_weighted"]
-            metric = st.radio("Rank by", CLF_METRICS, horizontal=True,
-                              key="clf_metric")
-            st.caption("Higher is better for all five.")
-            st.altair_chart(ranked_bars(shown, metric, True, ".3f"))
+            with st.container(border=True):
+                metric = st.radio("Rank by", CLF_METRICS, horizontal=True,
+                                  key="clf_metric")
+                st.caption("Higher is better for all five.")
+                st.altair_chart(ranked_bars(shown, metric, True, ".3f"))
 
             if "fit (s)" in shown:
-                st.subheader("Is the accuracy worth the compute?")
-                st.altair_chart(cost_scatter(shown, metric))
+                with st.container(border=True):
+                    st.subheader("Is the accuracy worth the compute?")
+                    st.altair_chart(cost_scatter(shown, metric))
 
             cv = restrict(load("classification_cv"), chosen)
             if cv is not None:
-                st.subheader("Cross-validation")
-                st.altair_chart(cv_bars(cv, "CV mean F1", "CV std"))
-                table_view(cv, "Cross-validation table")
+                with st.container(border=True):
+                    st.subheader("Cross-validation")
+                    st.altair_chart(cv_bars(cv, "CV mean F1", "CV std"))
+                    table_view(cv, "Cross-validation table")
 
             repr_df = load("classification_repr")
             if repr_df is not None:
-                st.subheader("Did dimensionality reduction help?")
-                st.caption("Same logistic-regression probe on three "
-                           "representations. LDA matches 100 features with one.")
-                st.altair_chart(ranked_bars(repr_df, "f1_weighted", True, ".4f"))
-                table_view(repr_df, "Representation table")
+                with st.container(border=True):
+                    st.subheader("Did dimensionality reduction help?")
+                    st.caption("Same logistic-regression probe on three "
+                               "representations. LDA matches 100 features "
+                               "with one.")
+                    st.altair_chart(ranked_bars(repr_df, "f1_weighted", True,
+                                                ".4f", by_family=False))
+                    table_view(repr_df, "Representation table")
 
             table_view(shown)
 
 # ---------------------------------------------------------------- clustering
 with clu:
+  with st.container(border=True):
     st.subheader("Not built yet")
-    st.write("`notebooks/clustering.ipynb` has no code cells, so there are no "
-             "algorithms to compare. Once it fits a few models, add their "
-             "comparison table to `WANTED` in `scripts/harvest_metrics.py` and "
-             "this tab fills in the same way.")
-    st.caption("Natural shape for the track: K-Means, Agglomerative and DBSCAN "
-               "scored on silhouette, Calinski-Harabasz and Davies-Bouldin.")
+    st.write("`notebooks/clustering.ipynb` has no code cells, so there are "
+             "no algorithms to compare. Once it fits a few models, add their "
+             "comparison table to `WANTED` in `scripts/harvest_metrics.py` "
+             "and this tab fills in the same way.")
+    st.caption("Natural shape for the track: K-Means, Agglomerative and "
+               "DBSCAN scored on silhouette, Calinski-Harabasz and "
+               "Davies-Bouldin.")
