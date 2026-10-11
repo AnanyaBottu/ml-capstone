@@ -1,0 +1,9 @@
+# Everything the notebooks and the helper scripts need, on top of
+# requirements.txt. Install both for local work:
+#   pip install -r requirements.txt -r requirements-dev.txt
+-r requirements.txt
+
+beautifulsoup4==4.15.0   # scripts/harvest_metrics.py parses notebook outputs
+jupyterlab==4.6.3
+matplotlib==3.11.1
+seaborn==0.13.2

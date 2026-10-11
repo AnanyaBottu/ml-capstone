@@ -1,0 +1,336 @@
+{
+  "track": "regression",
+  "target": "adr",
+  "model": "Hist Gradient Boosting (tuned)",
+  "columns": [
+    "hotel",
+    "lead_time",
+    "arrival_date_year",
+    "arrival_date_week_number",
+    "arrival_date_day_of_month",
+    "stays_in_weekend_nights",
+    "stays_in_week_nights",
+    "adults",
+    "children",
+    "babies",
+    "meal",
+    "country",
+    "market_segment",
+    "distribution_channel",
+    "is_repeated_guest",
+    "previous_cancellations",
+    "previous_bookings_not_canceled",
+    "reserved_room_type",
+    "booking_changes",
+    "deposit_type",
+    "agent",
+    "days_in_waiting_list",
+    "customer_type",
+    "required_car_parking_spaces",
+    "total_of_special_requests",
+    "has_company",
+    "has_agent",
+    "total_guests",
+    "is_family",
+    "total_nights",
+    "weekend_ratio",
+    "month_num",
+    "week_sin",
+    "week_cos",
+    "prev_total",
+    "prev_cancel_rate"
+  ],
+  "rare_levels": {
+    "country": [
+      "PRT",
+      "GBR",
+      "FRA",
+      "ESP",
+      "DEU",
+      "ITA",
+      "IRL",
+      "BEL",
+      "BRA",
+      "NLD",
+      "USA",
+      "CHE",
+      "CN",
+      "AUT",
+      "SWE",
+      "CHN",
+      "POL",
+      "RUS",
+      "NOR",
+      "ROU"
+    ],
+    "agent": [
+      "9",
+      "240",
+      "0",
+      "14",
+      "7",
+      "250",
+      "241",
+      "28",
+      "8",
+      "1",
+      "6",
+      "40",
+      "314",
+      "242",
+      "83"
+    ]
+  },
+  "fields": {
+    "hotel": {
+      "kind": "category",
+      "levels": [
+        "City Hotel",
+        "Resort Hotel"
+      ],
+      "default": "City Hotel"
+    },
+    "meal": {
+      "kind": "category",
+      "levels": [
+        "BB",
+        "FB",
+        "HB",
+        "SC"
+      ],
+      "default": "BB"
+    },
+    "country": {
+      "kind": "category",
+      "levels": [
+        "AUT",
+        "BEL",
+        "BRA",
+        "CHE",
+        "CHN",
+        "CN",
+        "DEU",
+        "ESP",
+        "FRA",
+        "GBR",
+        "IRL",
+        "ITA",
+        "NLD",
+        "NOR",
+        "Other",
+        "POL",
+        "PRT",
+        "ROU",
+        "RUS",
+        "SWE",
+        "USA"
+      ],
+      "default": "PRT"
+    },
+    "market_segment": {
+      "kind": "category",
+      "levels": [
+        "Aviation",
+        "Complementary",
+        "Corporate",
+        "Direct",
+        "Groups",
+        "Offline TA/TO",
+        "Online TA",
+        "Undefined"
+      ],
+      "default": "Online TA"
+    },
+    "distribution_channel": {
+      "kind": "category",
+      "levels": [
+        "Corporate",
+        "Direct",
+        "GDS",
+        "TA/TO",
+        "Undefined"
+      ],
+      "default": "TA/TO"
+    },
+    "reserved_room_type": {
+      "kind": "category",
+      "levels": [
+        "A",
+        "B",
+        "C",
+        "D",
+        "E",
+        "F",
+        "G",
+        "H",
+        "L"
+      ],
+      "default": "A"
+    },
+    "deposit_type": {
+      "kind": "category",
+      "levels": [
+        "No Deposit",
+        "Non Refund",
+        "Refundable"
+      ],
+      "default": "No Deposit"
+    },
+    "agent": {
+      "kind": "category",
+      "levels": [
+        "0",
+        "1",
+        "14",
+        "240",
+        "241",
+        "242",
+        "250",
+        "28",
+        "314",
+        "40",
+        "6",
+        "7",
+        "8",
+        "83",
+        "9",
+        "Other"
+      ],
+      "default": "9"
+    },
+    "customer_type": {
+      "kind": "category",
+      "levels": [
+        "Contract",
+        "Group",
+        "Transient",
+        "Transient-Party"
+      ],
+      "default": "Transient"
+    },
+    "lead_time": {
+      "kind": "integer",
+      "min": 0.0,
+      "max": 737.0,
+      "default": 49.0
+    },
+    "arrival_date_year": {
+      "kind": "integer",
+      "min": 2015.0,
+      "max": 2017.0,
+      "default": 2016.0
+    },
+    "arrival_date_week_number": {
+      "kind": "integer",
+      "min": 1.0,
+      "max": 53.0,
+      "default": 27.0
+    },
+    "arrival_date_day_of_month": {
+      "kind": "integer",
+      "min": 1.0,
+      "max": 31.0,
+      "default": 16.0
+    },
+    "stays_in_weekend_nights": {
+      "kind": "integer",
+      "min": 0.0,
+      "max": 19.0,
+      "default": 1.0
+    },
+    "stays_in_week_nights": {
+      "kind": "integer",
+      "min": 0.0,
+      "max": 50.0,
+      "default": 2.0
+    },
+    "adults": {
+      "kind": "integer",
+      "min": 0.0,
+      "max": 55.0,
+      "default": 2.0
+    },
+    "children": {
+      "kind": "integer",
+      "min": 0.0,
+      "max": 10.0,
+      "default": 0.0
+    },
+    "babies": {
+      "kind": "integer",
+      "min": 0.0,
+      "max": 10.0,
+      "default": 0.0
+    },
+    "is_repeated_guest": {
+      "kind": "integer",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 0.0
+    },
+    "previous_cancellations": {
+      "kind": "integer",
+      "min": 0.0,
+      "max": 26.0,
+      "default": 0.0
+    },
+    "previous_bookings_not_canceled": {
+      "kind": "integer",
+      "min": 0.0,
+      "max": 72.0,
+      "default": 0.0
+    },
+    "booking_changes": {
+      "kind": "integer",
+      "min": 0.0,
+      "max": 18.0,
+      "default": 0.0
+    },
+    "days_in_waiting_list": {
+      "kind": "integer",
+      "min": 0.0,
+      "max": 391.0,
+      "default": 0.0
+    },
+    "required_car_parking_spaces": {
+      "kind": "integer",
+      "min": 0.0,
+      "max": 8.0,
+      "default": 0.0
+    },
+    "total_of_special_requests": {
+      "kind": "integer",
+      "min": 0.0,
+      "max": 5.0,
+      "default": 1.0
+    },
+    "has_company": {
+      "kind": "integer",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 0.0
+    },
+    "has_agent": {
+      "kind": "integer",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 1.0
+    }
+  },
+  "engineered": [
+    "total_guests",
+    "is_family",
+    "total_nights",
+    "weekend_ratio",
+    "month_num",
+    "week_sin",
+    "week_cos",
+    "prev_total",
+    "prev_cancel_rate"
+  ],
+  "holdout": {
+    "R2": 0.8233,
+    "RMSE": 21.7876,
+    "MAE": 14.0212
+  }
+}

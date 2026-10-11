@@ -223,3 +223,9 @@ data/*.csv
 data/*.xls
 data/*.xlsx
 docs/
+
+# models/ artifacts are committed on purpose: deploy hosts run `streamlit run`
+# with no build step, so the fitted pipelines and schemas have to ship.
+
+# LibreOffice lock files
+.~lock.*#

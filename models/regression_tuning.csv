@@ -1,0 +1,3 @@
+model,default R2,tuned R2,default RMSE,tuned RMSE,default MAE,tuned MAE,R2 gain,RMSE saved (EUR)
+Hist Gradient Boosting,0.7554,0.8233,25.6382,21.7876,17.5642,14.0212,0.068,3.8505
+Random Forest,0.7806,0.7786,24.2785,24.3878,15.5145,15.6206,-0.002,-0.1093
