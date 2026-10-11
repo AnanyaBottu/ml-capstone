@@ -10,6 +10,7 @@ from pathlib import Path
 
 import altair as alt
 import joblib
+import numpy as np
 import pandas as pd
 import streamlit as st
 
@@ -254,10 +255,16 @@ def predict_form(track, title, caption):
                                              f"{track}_{column}")
         submitted = st.form_submit_button("Predict", type="primary")
 
-    if not submitted:
+    # Keeping the submitted answers in session state is what lets the sweep
+    # control below rerun without wiping the prediction.
+    state_key = f"{track}_answers"
+    if submitted:
+        st.session_state[state_key] = answers
+    stored = st.session_state.get(state_key)
+    if stored is None:
         return
 
-    row = build_row(answers, schema)
+    row = build_row(stored, schema)
     blank = row.columns[row.isna().any()].tolist()
     if blank:
         st.error(f"These model inputs came out empty, so the prediction would "
@@ -266,7 +273,7 @@ def predict_form(track, title, caption):
         return
 
     if track == "regression":
-        adr = float(pipe.predict(row)[0])
+        adr = float(predict_values(pipe, row, track)[0])
         mae = schema["holdout"]["MAE"]
         left, right = st.columns([1, 2])
         left.metric("Predicted ADR", f"€{adr:,.2f}")
@@ -274,7 +281,7 @@ def predict_form(track, title, caption):
                       f"read this as roughly €{adr - mae:,.0f} to "
                       f"€{adr + mae:,.0f} rather than an exact rate.")
     else:
-        risk = float(pipe.predict_proba(row)[:, 1][0])
+        risk = float(predict_values(pipe, row, track)[0])
         left, right = st.columns([1, 2])
         left.metric("Cancellation risk", f"{risk * 100:.1f}%")
         with right:
@@ -282,6 +289,77 @@ def predict_form(track, title, caption):
             st.caption(f"Classed as **{'cancelled' if risk >= 0.5 else 'kept'}**"
                        " at the usual 0.5 cut-off. The dataset's base rate is "
                        "37%, so compare against that, not against zero.")
+
+    sweep_section(track, stored, schema, pipe, specs)
+
+
+def predict_values(pipe, rows, track):
+    return (pipe.predict(rows) if track == "regression"
+            else pipe.predict_proba(rows)[:, 1])
+
+
+def sweep_values(spec):
+    """The values to try for one field: every level, or 40 steps across the
+    range the model was trained on."""
+    if spec["kind"] == "category":
+        return spec["levels"]
+    steps = np.linspace(spec["min"], spec["max"], 40)
+    if spec["kind"] == "integer":
+        return np.unique(steps.round().astype(int)).tolist()
+    return steps.tolist()
+
+
+def sweep_section(track, answers, schema, pipe, specs):
+    """Hold the booking fixed, move one field across its range, and plot what
+    the model does. Turns a single prediction into something you can poke at."""
+    st.markdown("**Move one field and watch the prediction**")
+    sweepable = [c for c in specs if c in answers]
+    column = st.selectbox("Field to vary", sorted(sweepable),
+                          format_func=lambda c: c.replace("_", " ").capitalize(),
+                          key=f"{track}_sweep")
+    spec = specs[column]
+
+    values = sweep_values(spec)
+    rows = pd.concat([build_row({**answers, column: v}, schema) for v in values],
+                     ignore_index=True)
+    if rows.isna().any().any():
+        st.caption("Cannot sweep this field without leaving gaps in the "
+                   "model's inputs.")
+        return
+
+    is_adr = track == "regression"
+    label = "Predicted ADR (EUR)" if is_adr else "Cancellation risk"
+    fmt = ".2f" if is_adr else ".1%"
+    d = pd.DataFrame({column: values,
+                      label: predict_values(pipe, rows, track)})
+    here = answers[column]
+
+    y = alt.Y(f"{label}:Q", title=label, scale=alt.Scale(zero=False))
+    tooltip = [alt.Tooltip(f"{column}:N" if spec["kind"] == "category"
+                           else f"{column}:Q"),
+               alt.Tooltip(f"{label}:Q", format=fmt)]
+
+    if spec["kind"] == "category":
+        # opacity, not a second hue, marks the level the user actually chose
+        chart = alt.Chart(d).mark_bar(cornerRadiusEnd=4, color=BLUE).encode(
+            x=alt.X(f"{column}:N", title=None, sort="-y",
+                    axis=alt.Axis(labelAngle=-40)),
+            y=y,
+            opacity=alt.condition(alt.datum[column] == here, alt.value(1.0),
+                                  alt.value(0.45)),
+            tooltip=tooltip)
+    else:
+        line = alt.Chart(d).mark_line(color=BLUE, strokeWidth=2).encode(
+            x=alt.X(f"{column}:Q", title=column.replace("_", " ")), y=y,
+            tooltip=tooltip)
+        mark = (alt.Chart(pd.DataFrame({column: [here]}))
+                .mark_rule(color=ORANGE, strokeWidth=2, strokeDash=[])
+                .encode(x=f"{column}:Q"))
+        chart = line + mark
+        st.caption(f"The orange rule is your value ({here}). Everything else "
+                   "in the booking is held where you set it.")
+
+    st.altair_chart(style(chart, 320))
 
 
 st.title("Capstone model comparison")

@@ -11,6 +11,7 @@ from pathlib import Path
 logging.disable(logging.WARNING)
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import pandas as pd  # noqa: E402
 import app  # noqa: E402
 
 reg = app.load("regression_models")
@@ -97,3 +98,32 @@ for track in ("regression", "classification"):
     print(f"ok: {track} responds to input ({a:.4f} -> {b:.4f} over lead_time)")
 
 print("ok: prediction path intact for both tracks")
+
+
+# ---- the sweep mechanics, across numeric and categorical fields ------------
+# Responsiveness is only asserted for lead_time. A shallow tree genuinely can
+# be flat in a given field for a given booking - the classification model
+# never splits on hotel along the path a median booking takes - so demanding
+# that every field move the prediction would be testing the data, not the code.
+for track in ("regression", "classification"):
+    pipe, schema = app.load_pipeline(track), app.load_schema(track)
+    base = answers_from(schema)
+    specs = {app.MONTH_FIELD: app.MONTH_SPEC,
+             **{k: v for k, v in schema["fields"].items() if k != "has_agent"}}
+
+    for column in ("lead_time", "hotel", app.MONTH_FIELD):
+        spec = specs[column]
+        values = app.sweep_values(spec)
+        assert len(values) > 1, f"{column}: nothing to sweep"
+        rows = pd.concat([app.build_row({**base, column: v}, schema)
+                          for v in values], ignore_index=True)
+        assert not rows.isna().any().any(), f"{track}/{column}: gaps in inputs"
+        out = app.predict_values(pipe, rows, track)
+        assert len(out) == len(values), f"{track}/{column}: wrong output length"
+        assert pd.notna(out).all(), f"{track}/{column}: produced NaN"
+        if column == "lead_time":
+            assert len(set(out.round(6))) > 1, \
+                f"{track}: sweeping lead_time never changes the prediction"
+    print(f"ok: {track} sweeps run clean and respond to lead_time")
+
+print("ok: all checks passed")
