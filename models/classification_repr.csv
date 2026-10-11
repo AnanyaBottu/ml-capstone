@@ -1,0 +1,4 @@
+representation,n_features,accuracy,f1_weighted
+full encoded,100,0.7989,0.7889
+PCA (29 comps),29,0.7855,0.7719
+LDA (1 comp),1,0.7994,0.7891

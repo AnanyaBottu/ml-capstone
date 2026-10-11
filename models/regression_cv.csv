@@ -1,0 +1,10 @@
+model,single-split R2,CV mean R2,CV std,CV time (s),difference
+Random Forest,0.7806,0.7666,0.0064,212.649,0.014
+Hist Gradient Boosting,0.7554,0.752,0.0028,6.9293,0.0033
+K-Nearest Neighbours,0.7201,0.7045,0.0064,6.6476,0.0156
+Decision Tree,0.5831,0.5621,0.0194,14.9608,0.021
+Ridge,0.5375,0.5389,0.0059,1.8801,-0.0013
+Linear Regression,0.5375,0.5389,0.0059,2.3303,-0.0013
+Lasso,0.5372,0.5387,0.0061,2.9802,-0.0015
+ElasticNet,0.5329,0.5349,0.0072,2.596,-0.002
+Polynomial Ridge,0.5149,0.5089,0.0063,7.3798,0.006
