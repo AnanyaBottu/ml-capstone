@@ -16,7 +16,6 @@ import streamlit as st
 
 from sklearn.metrics import (accuracy_score, confusion_matrix, f1_score,
                              precision_score, recall_score)
-from sklearn.model_selection import train_test_split
 
 import features
 
@@ -367,18 +366,16 @@ def sweep_section(track, answers, schema, pipe, specs):
 
 
 # --------------------------------------------------------- operating point
-@st.cache_data(show_spinner="Scoring the held-out bookings...")
+@st.cache_data
 def holdout_probabilities(track):
-    """True labels and predicted probabilities on the same test split the
-    notebook held out. Cached, so the slider below never refits or rescores."""
-    data = Path(__file__).parent / "data" / "hotel_bookings.csv"
-    pipe = load_pipeline(track)
-    if not data.exists() or pipe is None:
+    """True labels and predicted probabilities on the test split, exported by
+    scripts/train_models.py. Reading them back means the deployed app never
+    needs the 17 MB source CSV, and the slider never rescores anything."""
+    path = MODELS / f"{track}_holdout.csv"
+    if not path.exists():
         return None
-    X, y, _ = features.prepare(pd.read_csv(data), track)
-    _, X_test, _, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42, stratify=y)
-    return y_test.to_numpy(), pipe.predict_proba(X_test)[:, 1]
+    d = pd.read_csv(path)
+    return d.iloc[:, 0].to_numpy(), d["proba"].to_numpy()
 
 
 def confusion_heatmap(counts):
@@ -404,8 +401,8 @@ def confusion_heatmap(counts):
 def operating_point():
     scored = holdout_probabilities("classification")
     if scored is None:
-        st.info("Needs both `data/hotel_bookings.csv` and a fitted pipeline "
-                "(`.venv/bin/python scripts/train_models.py`).")
+        st.info("No held-out scores yet. Run "
+                "`.venv/bin/python scripts/train_models.py`, then reload.")
         return
     y_true, proba = scored
 

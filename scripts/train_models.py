@@ -137,6 +137,13 @@ def main():
                       "roc_auc": roc_auc_score(y_test, proba)}
         scores = {k: round(v, 4) for k, v in scores.items()}
 
+        # The threshold slider needs held-out probabilities, not the raw data.
+        # Exporting them here keeps the deployed app off the 17 MB CSV.
+        if track == "classification":
+            pd.DataFrame({"is_canceled": y_test.to_numpy(),
+                          "proba": proba}).to_csv(
+                OUT / "classification_holdout.csv", index=False)
+
         joblib.dump(pipe, OUT / f"{track}_pipeline.joblib")
         (OUT / f"{track}_schema.json").write_text(json.dumps(
             schema(X, categorical, numeric, levels, track, model_name, scores),
