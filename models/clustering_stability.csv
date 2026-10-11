@@ -1,0 +1,3 @@
+split,silhouette,Davies-Bouldin,Calinski-Harabasz
+"train (68,554)",0.224,1.866,8030.133
+"hold-out (17,139)",0.223,1.877,1976.711

@@ -1,0 +1,6 @@
+model,ARI vs is_canceled,NMI vs is_canceled,NMI vs hotel,cancel-rate spread
+K-Means,-0.034,0.017,0.02,0.251
+Agglomerative (ward),-0.034,0.017,0.014,0.245
+Agglomerative (complete),-0.053,0.044,0.042,0.453
+Agglomerative (average),0.006,0.002,0.007,1.0
+Agglomerative (single),0.002,0.003,0.002,1.0

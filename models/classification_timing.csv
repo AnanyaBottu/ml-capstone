@@ -1,6 +1,6 @@
 model,accuracy,f1_weighted,fit (s),train rows
-Decision Tree,0.8271,0.8213,1.1403,68780
-Support Vector Machine,0.8203,0.8107,14.2536,15000
-K-Nearest Neighbors,0.8035,0.7966,0.2684,68780
-Logistic Regression,0.7989,0.7889,5.0253,68780
-Gaussian Naive Bayes,0.6502,0.6686,0.3961,68780
+Decision Tree,0.8271,0.8213,0.7707,68780
+Support Vector Machine,0.8203,0.8107,7.8845,15000
+K-Nearest Neighbors,0.8035,0.7966,0.1541,68780
+Logistic Regression,0.7989,0.7889,0.9459,68780
+Gaussian Naive Bayes,0.6502,0.6686,0.2878,68780

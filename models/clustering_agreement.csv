@@ -1,0 +1,6 @@
+model,K-Means,Agglomerative (ward),Agglomerative (complete),Agglomerative (average),Agglomerative (single)
+K-Means,1.0,0.905,0.039,-0.006,0.003
+Agglomerative (ward),0.905,1.0,0.02,-0.013,0.002
+Agglomerative (complete),0.039,0.02,1.0,0.188,0.002
+Agglomerative (average),-0.006,-0.013,0.188,1.0,0.051
+Agglomerative (single),0.003,0.002,0.002,0.051,1.0

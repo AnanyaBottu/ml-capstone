@@ -167,4 +167,34 @@ print("ok: both modes compile against their own surface")
 print(f"ok: threshold moves recall {recalls[0]:.3f} -> {recalls[-1]:.3f} "
       f"over {len(y_true):,} held-out bookings")
 
+
+# ---- clustering: every chart compiles, and the degenerate linkages are flagged
+clu = app.cluster_models()
+assert clu is not None and len(clu) == 5, "clustering_models missing"
+assert clu["usable"].dtype == bool, "usable must be a real boolean"
+assert clu.loc["K-Means", "usable"], "K-Means must count as usable"
+assert clu.loc[["Agglomerative (average)", "Agglomerative (single)"],
+               "usable"].eq(False).all(), "degenerate linkages not flagged"
+for metric, higher in [("Silhouette", True), ("Davies-Bouldin", False),
+                       ("Calinski-Harabasz", True)]:
+    assert app.cluster_bars(clu, metric, higher).to_dict()
+assert app.balance_bars(clu).to_dict()
+kmeans, ward = app.load("clustering_kmeans_k"), app.load("clustering_ward_k")
+assert kmeans is not None and ward is not None
+assert "inertia" in kmeans and "inertia" not in ward, \
+    "the Ward sweep was matched to the K-Means table"
+for index in ("silhouette", "davies_bouldin", "calinski_harabasz"):
+    assert app.k_lines(kmeans, ward, index).to_dict()
+assert app.elbow(kmeans).to_dict()
+assert app.K_CHOSEN in kmeans.index, "chosen k is not in the sweep"
+agree = app.load("clustering_agreement")
+assert (agree.to_numpy().diagonal() == 1).all(), "ARI diagonal must be 1"
+assert app.agreement_heatmap(agree).to_dict()
+profile = app.load("clustering_profile")
+assert abs(profile["share_%"].sum() - 100) < 0.5, "segment shares do not sum to 100"
+for feature, fmt in app.SEGMENT_FEATURES.items():
+    assert feature in profile, f"profile lost column {feature}"
+    assert app.segment_bars(profile, feature, fmt).to_dict()
+print("ok: clustering tables load and every clustering chart compiles")
+
 print("ok: all checks passed")
