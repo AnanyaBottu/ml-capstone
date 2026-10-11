@@ -148,6 +148,29 @@ def table_view(df, label="Full metric table"):
         st.dataframe(df, width="stretch")
 
 
+def pick_models(df, key):
+    """Which algorithms the charts below should show. Returns None when the
+    user has cleared the lot, so callers can skip rendering."""
+    names = df.index.tolist()
+    chosen = st.multiselect("Algorithms on show", names, default=names,
+                            key=key, help="Clear a few to compare a subset "
+                            "without the weak models flattening the scale.")
+    if not chosen:
+        st.info("Pick at least one algorithm.")
+        return None
+    return df.loc[[n for n in names if n in chosen]]
+
+
+def restrict(df, chosen):
+    """Narrow a secondary table (CV, tuning) to the chosen algorithms. Those
+    tables cover fewer models than the leaderboard, so an empty overlap is
+    normal rather than an error."""
+    if df is None:
+        return None
+    keep = [i for i in df.index if i in chosen]
+    return df.loc[keep] if keep else None
+
+
 # ------------------------------------------------------------- prediction form
 # arrival_date_month is consumed by features.engineer() and dropped there, so
 # it is not in the saved column list and has to be asked for separately.
@@ -283,40 +306,46 @@ with reg:
         leaderboard(models, "R2", True, ["R2", "RMSE", "MAE", "fit (s)"])
         st.divider()
 
-        REG_METRICS = {"R2": (True, ".3f", ""),
-                       "RMSE": (False, ".1f", " (EUR)"),
-                       "MAE": (False, ".1f", " (EUR)")}
-        metric = st.radio("Rank the ten algorithms by", list(REG_METRICS),
-                          horizontal=True, key="reg_metric")
-        higher, fmt, unit = REG_METRICS[metric]
-        st.caption("Higher is better." if higher else "Lower is better.")
-        st.altair_chart(ranked_bars(models, metric, higher, fmt, unit))
+        shown = pick_models(models, "reg_pick")
+        if shown is not None:
+            chosen = shown.index.tolist()
 
-        left, right = st.columns(2)
-        with left:
-            st.subheader("Does it generalise?")
-            st.caption("Train R2 against test R2. A wide pair is memorisation.")
-            st.altair_chart(paired_bars(models, "train R2", "R2", "R2",
-                                        names=("train", "test")))
-        with right:
-            st.subheader("Is the accuracy worth the compute?")
-            st.caption("Random Forest buys its lead with ~33x the fit time of "
-                       "Hist Gradient Boosting.")
-            st.altair_chart(cost_scatter(models, "R2"))
+            REG_METRICS = {"R2": (True, ".3f", ""),
+                           "RMSE": (False, ".1f", " (EUR)"),
+                           "MAE": (False, ".1f", " (EUR)")}
+            metric = st.radio("Rank by", list(REG_METRICS), horizontal=True,
+                              key="reg_metric")
+            higher, fmt, unit = REG_METRICS[metric]
+            st.caption("Higher is better." if higher else "Lower is better.")
+            st.altair_chart(ranked_bars(shown, metric, higher, fmt, unit))
 
-        cv = load("regression_cv")
-        if cv is not None:
-            st.subheader("Does the ranking survive 5-fold cross-validation?")
-            st.altair_chart(cv_bars(cv, "CV mean R2", "CV std"))
-            table_view(cv, "Cross-validation table")
+            left, right = st.columns(2)
+            with left:
+                st.subheader("Does it generalise?")
+                st.caption("Train R2 against test R2. A wide pair is "
+                           "memorisation.")
+                st.altair_chart(paired_bars(shown, "train R2", "R2", "R2",
+                                            names=("train", "test")))
+            with right:
+                st.subheader("Is the accuracy worth the compute?")
+                st.caption("Random Forest buys its lead with ~33x the fit "
+                           "time of Hist Gradient Boosting.")
+                st.altair_chart(cost_scatter(shown, "R2"))
 
-        tuning = load("regression_tuning")
-        if tuning is not None:
-            st.subheader("What did tuning buy?")
-            st.altair_chart(paired_bars(tuning, "default R2", "tuned R2", "Test R2"))
-            table_view(tuning, "Tuning table")
+            cv = restrict(load("regression_cv"), chosen)
+            if cv is not None:
+                st.subheader("Does the ranking survive cross-validation?")
+                st.altair_chart(cv_bars(cv, "CV mean R2", "CV std"))
+                table_view(cv, "Cross-validation table")
 
-        table_view(models)
+            tuning = restrict(load("regression_tuning"), chosen)
+            if tuning is not None:
+                st.subheader("What did tuning buy?")
+                st.altair_chart(paired_bars(tuning, "default R2", "tuned R2",
+                                            "Test R2"))
+                table_view(tuning, "Tuning table")
+
+            table_view(shown)
 
 # ------------------------------------------------------------ classification
 with clf:
@@ -336,32 +365,36 @@ with clf:
                     ["accuracy", "f1_weighted", "roc_auc"])
         st.divider()
 
-        CLF_METRICS = ["f1_weighted", "accuracy", "roc_auc",
-                       "precision_weighted", "recall_weighted"]
-        metric = st.radio("Rank the five algorithms by", CLF_METRICS,
-                          horizontal=True, key="clf_metric")
-        st.caption("Higher is better for all five.")
-        st.altair_chart(ranked_bars(models, metric, True, ".3f"))
+        shown = pick_models(models, "clf_pick")
+        if shown is not None:
+            chosen = shown.index.tolist()
 
-        if "fit (s)" in models:
-            st.subheader("Is the accuracy worth the compute?")
-            st.altair_chart(cost_scatter(models, metric))
+            CLF_METRICS = ["f1_weighted", "accuracy", "roc_auc",
+                           "precision_weighted", "recall_weighted"]
+            metric = st.radio("Rank by", CLF_METRICS, horizontal=True,
+                              key="clf_metric")
+            st.caption("Higher is better for all five.")
+            st.altair_chart(ranked_bars(shown, metric, True, ".3f"))
 
-        cv = load("classification_cv")
-        if cv is not None:
-            st.subheader("Cross-validation, top two models")
-            st.altair_chart(cv_bars(cv, "CV mean F1", "CV std"))
-            table_view(cv, "Cross-validation table")
+            if "fit (s)" in shown:
+                st.subheader("Is the accuracy worth the compute?")
+                st.altair_chart(cost_scatter(shown, metric))
 
-        repr_df = load("classification_repr")
-        if repr_df is not None:
-            st.subheader("Did dimensionality reduction help?")
-            st.caption("Same logistic-regression probe on three "
-                       "representations. LDA matches 100 features with one.")
-            st.altair_chart(ranked_bars(repr_df, "f1_weighted", True, ".4f"))
-            table_view(repr_df, "Representation table")
+            cv = restrict(load("classification_cv"), chosen)
+            if cv is not None:
+                st.subheader("Cross-validation")
+                st.altair_chart(cv_bars(cv, "CV mean F1", "CV std"))
+                table_view(cv, "Cross-validation table")
 
-        table_view(models)
+            repr_df = load("classification_repr")
+            if repr_df is not None:
+                st.subheader("Did dimensionality reduction help?")
+                st.caption("Same logistic-regression probe on three "
+                           "representations. LDA matches 100 features with one.")
+                st.altair_chart(ranked_bars(repr_df, "f1_weighted", True, ".4f"))
+                table_view(repr_df, "Representation table")
+
+            table_view(shown)
 
 # ---------------------------------------------------------------- clustering
 with clu:
