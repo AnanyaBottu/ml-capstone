@@ -1,0 +1,8 @@
+# Light is pinned on purpose: the chart palette is validated against this
+# surface colour, and a dark flip would need its own validated steps.
+[theme]
+base = "light"
+primaryColor = "#2a78d6"
+backgroundColor = "#fcfcfb"
+secondaryBackgroundColor = "#f2f2ef"
+textColor = "#0b0b0b"

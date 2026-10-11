@@ -1,0 +1,374 @@
+"""Dashboard for the three capstone tracks: enter a booking and get a
+prediction, or compare how the algorithms scored.
+
+Metric tables come from scripts/harvest_metrics.py (scraped out of the
+notebook outputs); the fitted pipelines come from scripts/train_models.py.
+Nothing is fitted here, so every control is instant.
+"""
+import json
+from pathlib import Path
+
+import altair as alt
+import joblib
+import pandas as pd
+import streamlit as st
+
+import features
+
+BLUE, ORANGE = "#2a78d6", "#eb6834"
+SURFACE, INK, MUTED, GRID = "#fcfcfb", "#0b0b0b", "#52514e", "#e8e8e5"
+
+MODELS = Path(__file__).parent / "models"
+
+st.set_page_config(page_title="Capstone Model Comparison", page_icon="📊",
+                   layout="wide")
+
+
+@st.cache_data
+def load(name):
+    path = MODELS / f"{name}.csv"
+    return pd.read_csv(path, index_col=0) if path.exists() else None
+
+
+@st.cache_resource
+def load_pipeline(track):
+    # joblib unpickles, so this only ever reads models/ written by
+    # scripts/train_models.py in this repo - never an uploaded or fetched file.
+    path = MODELS / f"{track}_pipeline.joblib"
+    return joblib.load(path) if path.exists() else None
+
+
+@st.cache_data
+def load_schema(track):
+    path = MODELS / f"{track}_schema.json"
+    return json.loads(path.read_text()) if path.exists() else None
+
+
+def style(chart, height):
+    return (chart.properties(height=height, width="container")
+            .configure_view(strokeWidth=0, fill=SURFACE)
+            .configure_axis(grid=True, gridColor=GRID, gridWidth=1,
+                            domainColor=GRID, tickColor=GRID,
+                            labelColor=MUTED, titleColor=MUTED,
+                            labelFontSize=12, titleFontSize=12)
+            .configure_legend(labelColor=MUTED, titleColor=MUTED, orient="top",
+                              direction="horizontal", title=None)
+            .configure_title(color=INK, fontSize=14, anchor="start"))
+
+
+def ranked_bars(df, metric, higher_is_better, fmt=".3f", unit=""):
+    """One metric, every model, sorted best to worst. Single series, so the
+    title carries identity and each bar is directly labelled."""
+    d = df.reset_index().rename(columns={df.index.name or "index": "model"})
+    base = alt.Chart(d).encode(
+        x=alt.X(f"{metric}:Q", title=f"{metric}{unit}",
+                scale=alt.Scale(nice=True)),
+        y=alt.Y("model:N", sort=alt.EncodingSortField(metric, order="descending"
+                if higher_is_better else "ascending"), title=None),
+        tooltip=[alt.Tooltip("model:N", title="Model"),
+                 alt.Tooltip(f"{metric}:Q", format=fmt)],
+    )
+    bars = base.mark_bar(cornerRadiusEnd=4, color=BLUE, height=18)
+    labels = base.mark_text(align="left", dx=6, color=MUTED, fontSize=11).encode(
+        text=alt.Text(f"{metric}:Q", format=fmt))
+    return style(bars + labels, 30 * len(d) + 60)
+
+
+def paired_bars(df, left, right, value_title, names=("default", "tuned")):
+    """Two series on one shared scale. Legend plus direct labels, so the
+    pairing never rests on colour alone."""
+    d = (df[[left, right]].rename(columns=dict(zip([left, right], names)))
+         .reset_index().melt(id_vars=df.index.name or "index",
+                             var_name="setting", value_name="value")
+         .rename(columns={df.index.name or "index": "model"}))
+    base = alt.Chart(d).encode(
+        x=alt.X("value:Q", title=value_title),
+        y=alt.Y("model:N", title=None),
+        yOffset=alt.YOffset("setting:N", sort=list(names)),
+        color=alt.Color("setting:N", sort=list(names),
+                        scale=alt.Scale(domain=list(names),
+                                        range=[BLUE, ORANGE])),
+        tooltip=["model:N", "setting:N", alt.Tooltip("value:Q", format=".4f")],
+    )
+    bars = base.mark_bar(cornerRadiusEnd=3, height=14)
+    labels = base.mark_text(align="left", dx=5, color=MUTED, fontSize=10).encode(
+        text=alt.Text("value:Q", format=".3f"))
+    return style(bars + labels, 46 * d["model"].nunique() + 80)
+
+
+def cost_scatter(df, metric, time_col="fit (s)"):
+    """Score against what it cost to fit. One hue, labelled points: ten
+    categorical colours here would be unreadable and CVD-unsafe."""
+    d = df.reset_index().rename(columns={df.index.name or "index": "model"})
+    base = alt.Chart(d).encode(
+        x=alt.X(f"{time_col}:Q", title="Fit time (seconds, log scale)",
+                scale=alt.Scale(type="log", nice=False)),
+        y=alt.Y(f"{metric}:Q", title=metric, scale=alt.Scale(zero=False)),
+        tooltip=["model:N", alt.Tooltip(f"{metric}:Q", format=".4f"),
+                 alt.Tooltip(f"{time_col}:Q", format=".2f", title="fit (s)")],
+    )
+    points = base.mark_point(filled=True, size=130, color=BLUE,
+                             stroke=SURFACE, strokeWidth=2)
+    labels = base.mark_text(align="left", dx=10, dy=-6, color=MUTED,
+                            fontSize=11).encode(text="model:N")
+    return style(points + labels, 420)
+
+
+def cv_bars(df, mean_col, std_col):
+    """Cross-validated mean with a +/- 2 sd interval, so a lead inside the
+    noise is visible as one."""
+    d = df.reset_index().rename(columns={df.index.name or "index": "model"})
+    d["lo"] = d[mean_col] - 2 * d[std_col]
+    d["hi"] = d[mean_col] + 2 * d[std_col]
+    y = alt.Y("model:N", sort=alt.EncodingSortField(mean_col, order="descending"),
+              title=None)
+    bars = alt.Chart(d).mark_bar(cornerRadiusEnd=4, color=BLUE, height=18).encode(
+        x=alt.X(f"{mean_col}:Q", title=f"{mean_col} (bars show +/- 2 sd)"),
+        y=y,
+        tooltip=["model:N", alt.Tooltip(f"{mean_col}:Q", format=".4f"),
+                 alt.Tooltip(f"{std_col}:Q", format=".4f", title="sd")])
+    rule = alt.Chart(d).mark_rule(color=INK, strokeWidth=1.5).encode(
+        x="lo:Q", x2="hi:Q", y=y)
+    return style(bars + rule, 30 * len(d) + 60)
+
+
+def leaderboard(df, best_col, higher_is_better, headline, fmt="{:.4f}"):
+    """Winner as a stat row: the headline is a number, not a chart."""
+    best = df[best_col].idxmax() if higher_is_better else df[best_col].idxmin()
+    row = df.loc[best]
+    st.caption(f"Best on {best_col}")
+    st.subheader(best)
+    cols = st.columns(len(headline))
+    for col, name in zip(cols, headline):
+        col.metric(name, fmt.format(row[name]) if name in row else "n/a")
+
+
+def table_view(df, label="Full metric table"):
+    with st.expander(label):
+        st.dataframe(df, width="stretch")
+
+
+# ------------------------------------------------------------- prediction form
+# arrival_date_month is consumed by features.engineer() and dropped there, so
+# it is not in the saved column list and has to be asked for separately.
+MONTH_FIELD = "arrival_date_month"
+MONTH_SPEC = {"kind": "category", "levels": features.MONTHS,
+              "default": "August"}
+
+FIELD_GROUPS = {
+    "Stay": ["hotel", "arrival_date_year", MONTH_FIELD,
+             "arrival_date_week_number", "arrival_date_day_of_month",
+             "stays_in_weekend_nights", "stays_in_week_nights",
+             "reserved_room_type", "meal"],
+    "Guests": ["adults", "children", "babies", "country", "is_repeated_guest",
+               "required_car_parking_spaces", "total_of_special_requests"],
+    "Booking": ["lead_time", "market_segment", "distribution_channel",
+                "deposit_type", "customer_type", "agent", "has_company",
+                "booking_changes", "days_in_waiting_list", "adr"],
+    "Guest history": ["previous_cancellations",
+                      "previous_bookings_not_canceled"],
+}
+
+
+def widget(column, spec, key):
+    label = column.replace("_", " ").capitalize()
+    if spec["kind"] == "category":
+        levels = spec["levels"]
+        default = spec["default"] if spec["default"] in levels else levels[0]
+        return st.selectbox(label, levels, index=levels.index(default), key=key)
+    # a 0/1 integer is a flag, and a checkbox reads better than a spinner
+    if spec["kind"] == "integer" and spec["min"] == 0 and spec["max"] == 1:
+        return int(st.checkbox(label, value=bool(spec["default"]), key=key))
+    cast = int if spec["kind"] == "integer" else float
+    return cast(st.number_input(
+        label, min_value=cast(spec["min"]), max_value=cast(spec["max"]),
+        value=cast(spec["default"]), step=cast(1), key=key))
+
+
+def build_row(answers, schema):
+    """One answered form to one model-ready row, through the same functions
+    the training script used."""
+    row = pd.DataFrame([answers])
+    # has_agent is the presence of an agent id, so it follows from that answer
+    row["has_agent"] = int(row.at[0, "agent"] != "0")
+    row = features.engineer(row)
+    row = features.apply_rare_levels(row, schema["rare_levels"])
+    return row.reindex(columns=schema["columns"])
+
+
+def predict_form(track, title, caption):
+    pipe, schema = load_pipeline(track), load_schema(track)
+    if pipe is None or schema is None:
+        st.info("No fitted pipeline yet. Run "
+                "`.venv/bin/python scripts/train_models.py` (about a minute), "
+                "then reload.")
+        return
+
+    st.subheader(title)
+    st.caption(f"{caption} Predictions come from **{schema['model']}** - "
+               + ", ".join(f"holdout {k} {v}"
+                           for k, v in schema["holdout"].items()) + ".")
+
+    specs = {MONTH_FIELD: MONTH_SPEC,
+             **{k: v for k, v in schema["fields"].items() if k != "has_agent"}}
+    grouped = {c for cols in FIELD_GROUPS.values() for c in cols}
+    groups = {**FIELD_GROUPS,
+              "Other": [c for c in specs if c not in grouped]}
+
+    with st.form(f"{track}_form"):
+        st.caption("Every field starts at the training-set median or most "
+                   "common value, so change what you care about and submit.")
+        answers = {}
+        for group, columns in groups.items():
+            present = [c for c in columns if c in specs]
+            if not present:
+                continue
+            st.markdown(f"**{group}**")
+            slots = st.columns(3)
+            for i, column in enumerate(present):
+                with slots[i % 3]:
+                    answers[column] = widget(column, specs[column],
+                                             f"{track}_{column}")
+        submitted = st.form_submit_button("Predict", type="primary")
+
+    if not submitted:
+        return
+
+    row = build_row(answers, schema)
+    blank = row.columns[row.isna().any()].tolist()
+    if blank:
+        st.error(f"These model inputs came out empty, so the prediction would "
+                 f"be meaningless: {blank}. The form and the saved pipeline "
+                 f"have drifted - rerun scripts/train_models.py.")
+        return
+
+    if track == "regression":
+        adr = float(pipe.predict(row)[0])
+        mae = schema["holdout"]["MAE"]
+        left, right = st.columns([1, 2])
+        left.metric("Predicted ADR", f"€{adr:,.2f}")
+        right.caption(f"Typical error on held-out bookings is €{mae:.2f}, so "
+                      f"read this as roughly €{adr - mae:,.0f} to "
+                      f"€{adr + mae:,.0f} rather than an exact rate.")
+    else:
+        risk = float(pipe.predict_proba(row)[:, 1][0])
+        left, right = st.columns([1, 2])
+        left.metric("Cancellation risk", f"{risk * 100:.1f}%")
+        with right:
+            st.progress(risk)
+            st.caption(f"Classed as **{'cancelled' if risk >= 0.5 else 'kept'}**"
+                       " at the usual 0.5 cut-off. The dataset's base rate is "
+                       "37%, so compare against that, not against zero.")
+
+
+st.title("Capstone model comparison")
+st.caption("Metrics harvested from the notebook outputs. Nothing is retrained "
+           "here, so every control responds instantly.")
+
+reg, clf, clu = st.tabs(["Regression - `adr`",
+                         "Classification - `is_canceled`",
+                         "Clustering"])
+
+# ---------------------------------------------------------------- regression
+with reg:
+    predict_form("regression", "Price a booking",
+                 "Enter a booking and get its average daily rate in euros.")
+    st.divider()
+
+    models = load("regression_models")
+    if models is None:
+        st.warning("Run `python scripts/harvest_metrics.py` first.")
+    else:
+        st.header("How the ten algorithms compared")
+        leaderboard(models, "R2", True, ["R2", "RMSE", "MAE", "fit (s)"])
+        st.divider()
+
+        REG_METRICS = {"R2": (True, ".3f", ""),
+                       "RMSE": (False, ".1f", " (EUR)"),
+                       "MAE": (False, ".1f", " (EUR)")}
+        metric = st.radio("Rank the ten algorithms by", list(REG_METRICS),
+                          horizontal=True, key="reg_metric")
+        higher, fmt, unit = REG_METRICS[metric]
+        st.caption("Higher is better." if higher else "Lower is better.")
+        st.altair_chart(ranked_bars(models, metric, higher, fmt, unit))
+
+        left, right = st.columns(2)
+        with left:
+            st.subheader("Does it generalise?")
+            st.caption("Train R2 against test R2. A wide pair is memorisation.")
+            st.altair_chart(paired_bars(models, "train R2", "R2", "R2",
+                                        names=("train", "test")))
+        with right:
+            st.subheader("Is the accuracy worth the compute?")
+            st.caption("Random Forest buys its lead with ~33x the fit time of "
+                       "Hist Gradient Boosting.")
+            st.altair_chart(cost_scatter(models, "R2"))
+
+        cv = load("regression_cv")
+        if cv is not None:
+            st.subheader("Does the ranking survive 5-fold cross-validation?")
+            st.altair_chart(cv_bars(cv, "CV mean R2", "CV std"))
+            table_view(cv, "Cross-validation table")
+
+        tuning = load("regression_tuning")
+        if tuning is not None:
+            st.subheader("What did tuning buy?")
+            st.altair_chart(paired_bars(tuning, "default R2", "tuned R2", "Test R2"))
+            table_view(tuning, "Tuning table")
+
+        table_view(models)
+
+# ------------------------------------------------------------ classification
+with clf:
+    predict_form("classification", "Will this booking cancel?",
+                 "Enter a booking and get its cancellation probability.")
+    st.divider()
+
+    models = load("classification_models")
+    timing = load("classification_timing")
+    if models is None:
+        st.warning("Run `python scripts/harvest_metrics.py` first.")
+    else:
+        if timing is not None:
+            models = models.join(timing[["fit (s)", "train rows"]])
+        st.header("How the five algorithms compared")
+        leaderboard(models, "f1_weighted", True,
+                    ["accuracy", "f1_weighted", "roc_auc"])
+        st.divider()
+
+        CLF_METRICS = ["f1_weighted", "accuracy", "roc_auc",
+                       "precision_weighted", "recall_weighted"]
+        metric = st.radio("Rank the five algorithms by", CLF_METRICS,
+                          horizontal=True, key="clf_metric")
+        st.caption("Higher is better for all five.")
+        st.altair_chart(ranked_bars(models, metric, True, ".3f"))
+
+        if "fit (s)" in models:
+            st.subheader("Is the accuracy worth the compute?")
+            st.altair_chart(cost_scatter(models, metric))
+
+        cv = load("classification_cv")
+        if cv is not None:
+            st.subheader("Cross-validation, top two models")
+            st.altair_chart(cv_bars(cv, "CV mean F1", "CV std"))
+            table_view(cv, "Cross-validation table")
+
+        repr_df = load("classification_repr")
+        if repr_df is not None:
+            st.subheader("Did dimensionality reduction help?")
+            st.caption("Same logistic-regression probe on three "
+                       "representations. LDA matches 100 features with one.")
+            st.altair_chart(ranked_bars(repr_df, "f1_weighted", True, ".4f"))
+            table_view(repr_df, "Representation table")
+
+        table_view(models)
+
+# ---------------------------------------------------------------- clustering
+with clu:
+    st.subheader("Not built yet")
+    st.write("`notebooks/clustering.ipynb` has no code cells, so there are no "
+             "algorithms to compare. Once it fits a few models, add their "
+             "comparison table to `WANTED` in `scripts/harvest_metrics.py` and "
+             "this tab fills in the same way.")
+    st.caption("Natural shape for the track: K-Means, Agglomerative and DBSCAN "
+               "scored on silhouette, Calinski-Harabasz and Davies-Bouldin.")
