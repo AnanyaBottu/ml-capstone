@@ -13,14 +13,64 @@ import joblib
 import numpy as np
 import pandas as pd
 import streamlit as st
+from streamlit import config as st_config
 
 from sklearn.metrics import (accuracy_score, confusion_matrix, f1_score,
                              precision_score, recall_score)
 
 import features
 
-BLUE, ORANGE, AQUA = "#2a78d6", "#eb6834", "#1baf7a"
-SURFACE, INK, MUTED, GRID = "#fcfcfb", "#0b0b0b", "#52514e", "#e8e8e5"
+BLUE, ORANGE, AQUA = "#2a78d6", "#e4632f", "#1baf7a"
+
+# One set of hues for both modes, so an algorithm keeps its colour when the
+# lights go out; only the surface and the ink swap. Both triples clear the
+# validator against their own surface (the orange is a step darker than it was
+# so it fits the narrower dark lightness band). The aqua sits just under 3:1 on
+# the light surface, which the direct bar labels are the relief for.
+LIGHT = {"surface": "#fcfcfb", "secondary": "#f2f2ef", "ink": "#0b0b0b",
+         "muted": "#52514e", "grid": "#e8e8e5", "ramp": "blues"}
+DARK = {"surface": "#1a1a19", "secondary": "#242422", "ink": "#f4f4f1",
+        "muted": "#a6a5a0", "grid": "#33332f", "ramp": "darkblue"}
+
+st.set_page_config(page_title="Capstone Model Comparison", page_icon="📊",
+                   layout="wide")
+
+# ----------------------------------------------------------------- light/dark
+# Streamlit has no per-session theme API, so the toggle writes the server's
+# theme config and reruns; the config travels with the next run and the
+# frontend re-themes itself.
+# ponytail: server-global, so two people viewing at once would flip each
+# other's theme. Fine for a demo, would need a CSS-variable theme to fix.
+MODE_KEY = "dark_mode"
+DARK_MODE = bool(st.session_state.get(MODE_KEY, False))
+PALETTE = DARK if DARK_MODE else LIGHT
+SURFACE, INK, MUTED, GRID = (PALETTE[k] for k in
+                             ("surface", "ink", "muted", "grid"))
+
+
+def sync_theme():
+    """Push the chosen mode into the theme config, once, then rerun."""
+    want = "dark" if DARK_MODE else "light"
+    if st_config.get_option("theme.base") == want:
+        return
+    for key, value in {"base": want, "primaryColor": BLUE,
+                       "backgroundColor": PALETTE["surface"],
+                       "secondaryBackgroundColor": PALETTE["secondary"],
+                       "textColor": PALETTE["ink"]}.items():
+        st_config.set_option(f"theme.{key}", value)
+    st.rerun()
+
+
+sync_theme()
+
+# The toolbar and the hosted "Manage app" badge are hosting chrome, not part
+# of the dashboard. Settings lived in that menu, which is why the mode toggle
+# is in the header instead.
+st.markdown("""<style>
+[data-testid="stToolbar"], [data-testid="stStatusWidget"],
+[data-testid="stAppDeployButton"], #MainMenu, footer {display: none !important;}
+</style>""", unsafe_allow_html=True)
+
 
 # Algorithms are coloured by family, not by rank, so a model keeps its colour
 # when the ranking metric changes or the selection narrows. Three families is
@@ -54,9 +104,6 @@ def family_color():
                      legend=alt.Legend(orient="top", direction="horizontal"))
 
 MODELS = Path(__file__).parent / "models"
-
-st.set_page_config(page_title="Capstone Model Comparison", page_icon="📊",
-                   layout="wide")
 
 
 @st.cache_data
@@ -456,7 +503,7 @@ def confusion_heatmap(counts):
         y=alt.Y("actual:N", title="Actual", sort=["kept", "cancelled"]))
     cells = base.mark_rect(stroke=SURFACE, strokeWidth=2).encode(
         color=alt.Color("bookings:Q", title="Bookings",
-                        scale=alt.Scale(scheme="blues")),
+                        scale=alt.Scale(scheme=PALETTE["ramp"])),
         tooltip=["actual:N", "predicted:N", alt.Tooltip("bookings:Q", format=",")])
     labels = base.mark_text(fontSize=15, fontWeight="bold").encode(
         text=alt.Text("bookings:Q", format=","),
@@ -503,9 +550,14 @@ def operating_point():
 
 
 
-st.title("Hotel Booking ML Capstone")
-st.caption("119,390 bookings · predict a nightly rate, score a cancellation, "
-           "and compare fifteen algorithms across three tracks")
+head, mode = st.columns([6, 1], vertical_alignment="bottom")
+with head:
+    st.title("Hotel Booking ML Capstone")
+    st.caption("119,390 bookings · predict a nightly rate, score a "
+               "cancellation, and compare fifteen algorithms across three "
+               "tracks")
+with mode:
+    st.toggle("Dark mode", key=MODE_KEY)
 
 FAMILY_NOTE = ("Bars and points are coloured by algorithm family, so a model "
                "keeps its colour when you change the metric or narrow the "

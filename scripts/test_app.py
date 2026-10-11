@@ -152,6 +152,18 @@ assert recalls == sorted(recalls, reverse=True), recalls
 assert app.confusion_heatmap(
     [("kept", "kept", 1), ("kept", "cancelled", 2),
      ("cancelled", "kept", 3), ("cancelled", "cancelled", 4)]).to_dict()
+# ---- dark mode must build the same charts off the other surface ----------
+app.PALETTE = app.DARK
+app.SURFACE, app.INK, app.MUTED, app.GRID = (
+    app.DARK[k] for k in ("surface", "ink", "muted", "grid"))
+dark_bars = app.ranked_bars(reg, "R2", True).to_dict()
+assert app.DARK["surface"] in str(dark_bars), "dark bars still on the light surface"
+assert app.DARK["ramp"] in str(app.confusion_heatmap(
+    [("kept", "kept", 1), ("kept", "cancelled", 2),
+     ("cancelled", "kept", 3), ("cancelled", "cancelled", 4)]).to_dict()), \
+    "confusion ramp did not follow the dark surface"
+print("ok: both modes compile against their own surface")
+
 print(f"ok: threshold moves recall {recalls[0]:.3f} -> {recalls[-1]:.3f} "
       f"over {len(y_true):,} held-out bookings")
 

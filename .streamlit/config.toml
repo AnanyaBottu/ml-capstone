@@ -1,8 +1,14 @@
-# Light is pinned on purpose: the chart palette is validated against this
-# surface colour, and a dark flip would need its own validated steps.
+# Startup theme. The in-app "Dark mode" toggle rewrites these at runtime, so
+# the values here are only the mode the app opens in. Both modes' chart
+# palettes are validated against their own surface colour.
 [theme]
 base = "light"
 primaryColor = "#2a78d6"
 backgroundColor = "#fcfcfb"
 secondaryBackgroundColor = "#f2f2ef"
 textColor = "#0b0b0b"
+
+# No Deploy button and no hamburger menu: the dashboard provides its own
+# controls, and the menu's Settings pane duplicated the theme toggle.
+[client]
+toolbarMode = "minimal"
