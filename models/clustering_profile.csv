@@ -1,0 +1,5 @@
+cluster,share_%,lead_time,nights,adr,guests,family,special_requests,parking,repeat_guest,has_agent,domestic,resort,non_refund,cancel_rate,top segment,top customer
+0,74.35,61.0,3.0,99.0,1.94,0.0,0.74,0.06,0.0,0.99,0.24,0.35,0.01,0.3,Online TA,Transient
+1,10.26,64.0,3.0,152.1,3.41,1.0,0.93,0.12,0.0,0.93,0.28,0.42,0.0,0.35,Online TA,Transient
+2,4.04,3.0,1.0,65.0,1.36,0.02,0.68,0.19,0.95,0.28,0.85,0.52,0.01,0.08,Corporate,Transient
+3,11.35,5.0,1.0,70.0,1.6,0.01,0.32,0.15,0.0,0.13,0.63,0.58,0.02,0.14,Direct,Transient

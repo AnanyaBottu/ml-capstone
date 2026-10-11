@@ -1,0 +1,6 @@
+model,k,Silhouette,Davies-Bouldin,Calinski-Harabasz,smallest cluster %,largest cluster %,fit (s),usable,rank Sil,rank DB,rank CH,mean rank
+Agglomerative (ward),4,0.221,1.88,907.733,3.988,74.775,2.317,True,1.0,1.0,2.0,1.333
+K-Means,4,0.22,1.888,946.434,4.163,73.388,0.21,True,2.0,2.0,1.0,1.667
+Agglomerative (complete),4,0.164,1.483,388.203,0.8,92.625,2.553,False,NaN,NaN,NaN,NaN
+Agglomerative (average),4,0.441,0.726,149.638,0.012,99.125,2.408,False,NaN,NaN,NaN,NaN
+Agglomerative (single),4,0.4,0.521,9.745,0.012,99.925,0.903,False,NaN,NaN,NaN,NaN

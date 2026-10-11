@@ -14,7 +14,9 @@ from bs4 import BeautifulSoup
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "models"
 
-# name -> (notebook, columns that identify the table, index name)
+# name -> (notebook, columns that identify the table, index name[, columns the
+# table must not have]). The exclusion exists because the K-Means sweep is a
+# strict superset of the Ward sweep's columns.
 WANTED = {
     "regression_models":     ("regression",     {"R2", "RMSE", "MAE", "fit (s)"}, "model"),
     "regression_cv":         ("regression",     {"CV mean R2", "CV std"}, "model"),
@@ -23,6 +25,14 @@ WANTED = {
     "classification_timing": ("classification", {"accuracy", "f1_weighted", "fit (s)"}, "model"),
     "classification_cv":     ("classification", {"CV mean F1", "CV std"}, "model"),
     "classification_repr":   ("classification", {"n_features", "f1_weighted"}, "representation"),
+    "clustering_models":     ("clustering", {"Silhouette", "Davies-Bouldin", "smallest cluster %"}, "model"),
+    "clustering_kmeans_k":   ("clustering", {"inertia", "silhouette", "davies_bouldin"}, "k"),
+    "clustering_ward_k":     ("clustering", {"silhouette", "davies_bouldin", "calinski_harabasz"}, "k", {"inertia"}),
+    "clustering_agreement":  ("clustering", {"K-Means", "Agglomerative (ward)"}, "model"),
+    "clustering_stability":  ("clustering", {"silhouette", "Davies-Bouldin", "Calinski-Harabasz"}, "split"),
+    "clustering_shares":     ("clustering", {"train %", "hold-out %"}, "cluster"),
+    "clustering_profile":    ("clustering", {"share_%", "cancel_rate", "top segment"}, "cluster"),
+    "clustering_external":   ("clustering", {"ARI vs is_canceled", "NMI vs is_canceled"}, "model"),
 }
 
 
@@ -66,10 +76,12 @@ def main():
             print(f"skip   {nb}: notebook missing")
             continue
         tables = list(read_tables(path))
-        for name, (want_nb, signature, index_name) in WANTED.items():
+        for name, (want_nb, signature, index_name, *rest) in WANTED.items():
             if want_nb != nb:
                 continue
-            match = next((t for t in tables if signature <= set(t.columns)), None)
+            banned = rest[0] if rest else set()
+            match = next((t for t in tables if signature <= set(t.columns)
+                          and not banned & set(t.columns)), None)
             if match is None:
                 print(f"MISS   {name}: no table with columns {sorted(signature)}")
                 continue
