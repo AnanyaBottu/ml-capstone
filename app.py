@@ -14,6 +14,10 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
+from sklearn.metrics import (accuracy_score, confusion_matrix, f1_score,
+                             precision_score, recall_score)
+from sklearn.model_selection import train_test_split
+
 import features
 
 BLUE, ORANGE = "#2a78d6", "#eb6834"
@@ -362,6 +366,78 @@ def sweep_section(track, answers, schema, pipe, specs):
     st.altair_chart(style(chart, 320))
 
 
+# --------------------------------------------------------- operating point
+@st.cache_data(show_spinner="Scoring the held-out bookings...")
+def holdout_probabilities(track):
+    """True labels and predicted probabilities on the same test split the
+    notebook held out. Cached, so the slider below never refits or rescores."""
+    data = Path(__file__).parent / "data" / "hotel_bookings.csv"
+    pipe = load_pipeline(track)
+    if not data.exists() or pipe is None:
+        return None
+    X, y, _ = features.prepare(pd.read_csv(data), track)
+    _, X_test, _, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=42, stratify=y)
+    return y_test.to_numpy(), pipe.predict_proba(X_test)[:, 1]
+
+
+def confusion_heatmap(counts):
+    """2x2 counts on one sequential blue ramp, every cell labelled."""
+    d = pd.DataFrame(counts, columns=["actual", "predicted", "bookings"])
+    biggest = d["bookings"].max()
+    base = alt.Chart(d).encode(
+        x=alt.X("predicted:N", title="Predicted",
+                sort=["kept", "cancelled"], axis=alt.Axis(labelAngle=0)),
+        y=alt.Y("actual:N", title="Actual", sort=["kept", "cancelled"]))
+    cells = base.mark_rect(stroke=SURFACE, strokeWidth=2).encode(
+        color=alt.Color("bookings:Q", title="Bookings",
+                        scale=alt.Scale(scheme="blues")),
+        tooltip=["actual:N", "predicted:N", alt.Tooltip("bookings:Q", format=",")])
+    labels = base.mark_text(fontSize=15, fontWeight="bold").encode(
+        text=alt.Text("bookings:Q", format=","),
+        # dark cells need light ink, so the count stays readable either way
+        color=alt.condition(alt.datum.bookings > biggest / 2,
+                            alt.value(SURFACE), alt.value(INK)))
+    return style(cells + labels, 300)
+
+
+def operating_point():
+    scored = holdout_probabilities("classification")
+    if scored is None:
+        st.info("Needs both `data/hotel_bookings.csv` and a fitted pipeline "
+                "(`.venv/bin/python scripts/train_models.py`).")
+        return
+    y_true, proba = scored
+
+    st.subheader("Choose an operating point")
+    st.caption(f"Every threshold below is scored on the same "
+               f"{len(y_true):,} held-out bookings. Lower it to catch more "
+               "cancellations at the cost of flagging bookings that would "
+               "have been kept.")
+    threshold = st.slider("Flag as cancelled when the probability is at least",
+                          0.05, 0.95, 0.50, 0.01, key="clf_threshold")
+    pred = (proba >= threshold).astype(int)
+
+    tn, fp, fn, tp = confusion_matrix(y_true, pred, labels=[0, 1]).ravel()
+    cells = [("kept", "kept", int(tn)), ("kept", "cancelled", int(fp)),
+             ("cancelled", "kept", int(fn)), ("cancelled", "cancelled", int(tp))]
+
+    left, right = st.columns([2, 3])
+    with left:
+        st.metric("Cancellations caught",
+                  f"{recall_score(y_true, pred, zero_division=0) * 100:.1f}%")
+        st.metric("Of those flagged, actually cancelled",
+                  f"{precision_score(y_true, pred, zero_division=0) * 100:.1f}%")
+        st.metric("F1 (cancelled class)",
+                  f"{f1_score(y_true, pred, zero_division=0):.4f}")
+        st.metric("Accuracy", f"{accuracy_score(y_true, pred):.4f}")
+        st.caption(f"Missed {fn:,} cancellations and wrongly flagged "
+                   f"{fp:,} kept bookings.")
+    with right:
+        st.altair_chart(confusion_heatmap(cells))
+
+
+
 st.title("Capstone model comparison")
 st.caption("Metrics harvested from the notebook outputs. Nothing is retrained "
            "here, so every control responds instantly.")
@@ -429,6 +505,9 @@ with reg:
 with clf:
     predict_form("classification", "Will this booking cancel?",
                  "Enter a booking and get its cancellation probability.")
+    st.divider()
+
+    operating_point()
     st.divider()
 
     models = load("classification_models")

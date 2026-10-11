@@ -126,4 +126,33 @@ for track in ("regression", "classification"):
                 f"{track}: sweeping lead_time never changes the prediction"
     print(f"ok: {track} sweeps run clean and respond to lead_time")
 
+
+
+# ---- the threshold slider must reshape the confusion matrix ----------------
+scored = app.holdout_probabilities("classification")
+assert scored is not None, "no holdout probabilities (missing data or pipeline)"
+y_true, proba = scored
+assert len(y_true) == len(proba) and len(y_true) > 1000, len(y_true)
+assert 0 <= proba.min() and proba.max() <= 1
+
+import numpy as np  # noqa: E402
+from sklearn.metrics import confusion_matrix, recall_score  # noqa: E402
+
+shapes, recalls = [], []
+for t in (0.2, 0.5, 0.8):
+    pred = (proba >= t).astype(int)
+    tn, fp, fn, tp = confusion_matrix(y_true, pred, labels=[0, 1]).ravel()
+    assert tn + fp + fn + tp == len(y_true), f"threshold {t}: counts lost rows"
+    shapes.append((tn, fp, fn, tp))
+    recalls.append(recall_score(y_true, pred, zero_division=0))
+
+assert len(set(shapes)) == 3, f"threshold does not move the matrix: {shapes}"
+# a stricter threshold can only catch fewer cancellations
+assert recalls == sorted(recalls, reverse=True), recalls
+assert app.confusion_heatmap(
+    [("kept", "kept", 1), ("kept", "cancelled", 2),
+     ("cancelled", "kept", 3), ("cancelled", "cancelled", 4)]).to_dict()
+print(f"ok: threshold moves recall {recalls[0]:.3f} -> {recalls[-1]:.3f} "
+      f"over {len(y_true):,} held-out bookings")
+
 print("ok: all checks passed")
