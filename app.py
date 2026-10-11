@@ -550,11 +550,292 @@ def operating_point():
 
 
 
+# -------------------------------------------------------------- clustering
+# Two hues are enough: K-Means is the one centroid method, the other four are
+# linkages of the same hierarchical algorithm. Each keeps its colour whichever
+# metric is on show.
+CLUSTER_FAMILY = {"K-Means": "Centroid"}
+CLUSTER_ORDER = ["Centroid", "Hierarchical"]
+CLUSTER_RANGE = [BLUE, ORANGE]
+K_CHOSEN = 4  # the notebook's judgement call (section 6.4), not a metric result
+
+# Names the notebook gives the four K-Means segments in section 9. They are an
+# interpretation of the profile table, so an unknown cluster falls back to its
+# number rather than borrowing a wrong name.
+SEGMENT_NAMES = {0: "Mainstream online", 1: "Families", 2: "Repeat corporate",
+                 3: "Direct last-minute"}
+
+
+def cluster_family(model):
+    return CLUSTER_FAMILY.get(model, "Hierarchical")
+
+
+def cluster_models():
+    """The five-algorithm table with `usable` as a real boolean (the harvest
+    writes it as text) and a `solution` label that drives the bar colour."""
+    df = load("clustering_models")
+    if df is None:
+        return None
+    df = df.copy()
+    df["usable"] = df["usable"].astype(str).eq("True")
+    return df
+
+
+def cluster_bars(df, metric, higher_is_better, fmt=".3f"):
+    """One validity index, every algorithm. Bars that only score well by
+    isolating a handful of bookings are greyed rather than ranked in colour,
+    because a high silhouette there is an artefact, not a segmentation."""
+    d = df.reset_index()
+    d["solution"] = d["usable"].map({True: "usable partition",
+                                     False: "degenerate (smallest cluster < 1%)"})
+    d["family"] = d["model"].map(cluster_family)
+    base = alt.Chart(d).encode(
+        x=alt.X(f"{metric}:Q", title=metric, scale=alt.Scale(nice=True)),
+        y=alt.Y("model:N", title=None, sort=alt.EncodingSortField(
+            metric, order="descending" if higher_is_better else "ascending")),
+        tooltip=["model:N", alt.Tooltip(f"{metric}:Q", format=fmt),
+                 alt.Tooltip("smallest cluster %:Q", format=".2f"),
+                 alt.Tooltip("largest cluster %:Q", format=".1f"), "solution:N"])
+    bars = base.mark_bar(cornerRadiusEnd=4, height=18).encode(
+        color=alt.Color("family:N", title=None, scale=alt.Scale(
+            domain=CLUSTER_ORDER, range=CLUSTER_RANGE),
+            legend=alt.Legend(orient="top", direction="horizontal")),
+        opacity=alt.condition(alt.datum.usable, alt.value(1.0), alt.value(0.35)))
+    labels = base.mark_text(align="left", dx=6, color=MUTED, fontSize=11).encode(
+        text=alt.Text(f"{metric}:Q", format=fmt))
+    return style(bars + labels, 30 * len(d) + 70)
+
+
+def balance_bars(df):
+    """Share of all bookings held by the largest cluster. This is the number
+    that exposes the degenerate linkages."""
+    d = df.reset_index()
+    base = alt.Chart(d).encode(
+        x=alt.X("largest cluster %:Q", title="Largest cluster (% of bookings)",
+                scale=alt.Scale(domain=[0, 100])),
+        y=alt.Y("model:N", title=None, sort=alt.EncodingSortField(
+            "largest cluster %", order="descending")),
+        tooltip=["model:N", alt.Tooltip("largest cluster %:Q", format=".1f"),
+                 alt.Tooltip("smallest cluster %:Q", format=".3f")])
+    bars = base.mark_bar(cornerRadiusEnd=4, height=18, color=BLUE)
+    labels = base.mark_text(align="left", dx=6, color=MUTED, fontSize=11).encode(
+        text=alt.Text("largest cluster %:Q", format=".1f"))
+    return style(bars + labels, 30 * len(d) + 70)
+
+
+def k_lines(kmeans, ward, metric):
+    """Validity index against k for both algorithms on one shared axis, with
+    the notebook's chosen k marked."""
+    parts = [kmeans[[metric]].assign(model="K-Means")]
+    if ward is not None:
+        parts.append(ward[[metric]].assign(model="Agglomerative (ward)"))
+    d = pd.concat(parts).rename_axis("k").reset_index()
+    base = alt.Chart(d).encode(
+        x=alt.X("k:Q", title="Number of clusters (k)",
+                axis=alt.Axis(tickMinStep=1)),
+        y=alt.Y(f"{metric}:Q", title=metric, scale=alt.Scale(zero=False)),
+        color=alt.Color("model:N", title=None, scale=alt.Scale(
+            domain=["K-Means", "Agglomerative (ward)"],
+            range=[BLUE, ORANGE]),
+            legend=alt.Legend(orient="top", direction="horizontal")),
+        tooltip=["model:N", "k:Q", alt.Tooltip(f"{metric}:Q", format=".3f")])
+    lines = base.mark_line(strokeWidth=2)
+    points = base.mark_point(filled=True, size=70, stroke=SURFACE, strokeWidth=2)
+    chosen = (alt.Chart(pd.DataFrame({"k": [K_CHOSEN]}))
+              .mark_rule(color=MUTED, strokeDash=[4, 4]).encode(x="k:Q"))
+    return style(lines + points + chosen, 320)
+
+
+def elbow(kmeans):
+    d = kmeans.rename_axis("k").reset_index()
+    base = alt.Chart(d).encode(
+        x=alt.X("k:Q", title="Number of clusters (k)",
+                axis=alt.Axis(tickMinStep=1)),
+        y=alt.Y("inertia:Q", title="Inertia (within-cluster sum of squares)",
+                scale=alt.Scale(zero=False)),
+        tooltip=["k:Q", alt.Tooltip("inertia:Q", format=",.0f")])
+    line = base.mark_line(color=BLUE, strokeWidth=2)
+    points = base.mark_point(color=BLUE, filled=True, size=70, stroke=SURFACE,
+                             strokeWidth=2)
+    chosen = (alt.Chart(pd.DataFrame({"k": [K_CHOSEN]}))
+              .mark_rule(color=MUTED, strokeDash=[4, 4]).encode(x="k:Q"))
+    return style(line + points + chosen, 320)
+
+
+def agreement_heatmap(df):
+    """Adjusted Rand Index between every pair of algorithms, one sequential
+    ramp, every cell labelled."""
+    d = (df.rename_axis("a").reset_index()
+         .melt(id_vars="a", var_name="b", value_name="ARI"))
+    order = df.index.tolist()
+    base = alt.Chart(d).encode(
+        x=alt.X("b:N", title=None, sort=order, axis=alt.Axis(labelAngle=-30)),
+        y=alt.Y("a:N", title=None, sort=order))
+    cells = base.mark_rect(stroke=SURFACE, strokeWidth=2).encode(
+        color=alt.Color("ARI:Q", scale=alt.Scale(
+            scheme=PALETTE["ramp"], domain=[0, 1], clamp=True)),
+        tooltip=["a:N", "b:N", alt.Tooltip("ARI:Q", format=".3f")])
+    labels = base.mark_text(fontSize=12, fontWeight="bold").encode(
+        text=alt.Text("ARI:Q", format=".2f"),
+        color=alt.condition(alt.datum.ARI > 0.5, alt.value(SURFACE),
+                            alt.value(INK)))
+    return style(cells + labels, 340)
+
+
+def segment_bars(profile, feature, fmt):
+    d = profile[[feature]].copy()
+    d["segment"] = [f"{i} - {SEGMENT_NAMES.get(i, 'cluster')}" for i in d.index]
+    d["share"] = profile["share_%"].to_numpy()
+    base = alt.Chart(d).encode(
+        x=alt.X(f"{feature}:Q", title=feature.replace("_", " ")),
+        y=alt.Y("segment:N", title=None, sort=None),
+        tooltip=["segment:N", alt.Tooltip(f"{feature}:Q", format=fmt),
+                 alt.Tooltip("share:Q", format=".1f", title="share of bookings (%)")])
+    bars = base.mark_bar(cornerRadiusEnd=4, height=22, color=BLUE)
+    labels = base.mark_text(align="left", dx=6, color=MUTED, fontSize=11).encode(
+        text=alt.Text(f"{feature}:Q", format=fmt))
+    return style(bars + labels, 40 * len(d) + 70)
+
+
+# The profile columns worth charting, with a number format each.
+SEGMENT_FEATURES = {"share_%": ".1f", "cancel_rate": ".0%", "adr": ".0f",
+                    "lead_time": ".0f", "nights": ".1f", "guests": ".2f",
+                    "family": ".0%", "repeat_guest": ".0%", "has_agent": ".0%",
+                    "domestic": ".0%", "resort": ".0%", "non_refund": ".0%",
+                    "special_requests": ".2f", "parking": ".0%"}
+
+
+def clustering_tab():
+    models = cluster_models()
+    if models is None:
+        st.warning("Run `python scripts/harvest_metrics.py` first.")
+        return
+
+    st.header("How the five algorithms compared")
+    usable = models[models["usable"]]
+    best = usable["mean rank"].idxmin()
+    runner = usable["mean rank"].drop(best).idxmin()
+    with st.container(border=True):
+        st.markdown(
+            f'<div style="font-size:.8rem;color:{MUTED};letter-spacing:.04em;'
+            f'text-transform:uppercase;">Best usable partition at k = '
+            f'{K_CHOSEN}</div><div style="font-size:1.55rem;font-weight:700;'
+            f'margin:.1rem 0;">{best}</div>', unsafe_allow_html=True)
+        st.write("")
+        cols = st.columns(4)
+        for col, (name, fmt) in zip(cols, [("Silhouette", "{:.3f}"),
+                                           ("Davies-Bouldin", "{:.3f}"),
+                                           ("Calinski-Harabasz", "{:.0f}"),
+                                           ("fit (s)", "{:.2f}")]):
+            col.metric(name, fmt.format(models.at[best, name]))
+        st.caption(
+            f"{best} edges {runner} on mean rank "
+            f"({usable.at[best, 'mean rank']:.2f} vs "
+            f"{usable.at[runner, 'mean rank']:.2f}), but the two are "
+            "effectively tied. The notebook picks K-Means as the final model "
+            f"because it fits {models.at[best, 'fit (s)'] / models.at['K-Means', 'fit (s)']:.0f}x "
+            "faster and can assign new bookings.")
+
+    shown = pick_models(models, "clu_pick")
+    if shown is None:
+        return
+
+    with st.container(border=True):
+        metric = st.radio("Rank by", ["Silhouette", "Davies-Bouldin",
+                                      "Calinski-Harabasz"], horizontal=True,
+                          key="clu_metric")
+        higher = metric != "Davies-Bouldin"
+        st.caption("Higher is better." if higher else "Lower is better.")
+        st.altair_chart(cluster_bars(shown, metric, higher,
+                                     ".0f" if metric == "Calinski-Harabasz"
+                                     else ".3f"))
+        st.caption("Faded bars are not segmentations. Average and single "
+                   "linkage score best on Silhouette and Davies-Bouldin by "
+                   "isolating a handful of bookings, which is why the next "
+                   "chart matters.")
+
+    with st.container(border=True):
+        st.subheader("Why the top scores are a trap")
+        st.caption("Share of all bookings held by the biggest cluster. Near "
+                   "100% means one cluster plus a few stray points.")
+        st.altair_chart(balance_bars(shown))
+
+    kmeans, ward = load("clustering_kmeans_k"), load("clustering_ward_k")
+    if kmeans is not None:
+        with st.container(border=True):
+            st.subheader("Does any index pick a k?")
+            index = st.radio("Index", ["silhouette", "davies_bouldin",
+                                       "calinski_harabasz"], horizontal=True,
+                             key="clu_index")
+            st.altair_chart(k_lines(kmeans, ward, index))
+            st.caption(f"The dashed line is k = {K_CHOSEN}, chosen because "
+                       "it is the largest k where every cluster is a "
+                       "different kind of booking. No index picks it: "
+                       "silhouette peaks at k = 2.")
+            st.altair_chart(elbow(kmeans))
+            st.caption("The elbow is smooth, with no kink to read a k from.")
+
+    agree = load("clustering_agreement")
+    if agree is not None:
+        with st.container(border=True):
+            st.subheader("Do the algorithms find the same segments?")
+            st.altair_chart(agreement_heatmap(agree))
+            st.caption("Adjusted Rand Index, 1 = identical. K-Means and Ward "
+                       "agree at 0.905, so they are one solution found twice; "
+                       "the degenerate linkages agree with nothing.")
+
+    shares, stability = load("clustering_shares"), load("clustering_stability")
+    if shares is not None and stability is not None:
+        with st.container(border=True):
+            st.subheader("Does it hold up on unseen bookings?")
+            left, right = st.columns(2)
+            train, hold = stability.index[0], stability.index[1]
+            left.metric("Silhouette, hold-out",
+                        f"{stability.at[hold, 'silhouette']:.3f}",
+                        delta=f"{stability.at[hold, 'silhouette'] - stability.at[train, 'silhouette']:+.3f} vs train")
+            right.metric("Davies-Bouldin, hold-out",
+                         f"{stability.at[hold, 'Davies-Bouldin']:.3f}",
+                         delta=f"{stability.at[hold, 'Davies-Bouldin'] - stability.at[train, 'Davies-Bouldin']:+.3f} vs train",
+                         delta_color="inverse")
+            labelled = shares.copy()
+            labelled.index = [f"Cluster {i}" for i in labelled.index]
+            labelled.index.name = "cluster"
+            st.altair_chart(paired_bars(labelled, "train %", "hold-out %",
+                                        "Share of bookings (%)",
+                                        names=("train", "hold-out")))
+            st.caption("The final K-Means model on 17,139 bookings it never "
+                       "saw. Calinski-Harabasz is left out because it grows "
+                       "with the number of points.")
+
+    profile = load("clustering_profile")
+    if profile is not None:
+        with st.container(border=True):
+            st.subheader("Who are the four segments?")
+            feature = st.selectbox(
+                "Compare segments on", list(SEGMENT_FEATURES),
+                format_func=lambda c: c.replace("_", " ").replace(
+                    "share %", "share of bookings (%)"),
+                index=list(SEGMENT_FEATURES).index("cancel_rate"),
+                key="clu_feature")
+            st.altair_chart(segment_bars(profile, feature,
+                                         SEGMENT_FEATURES[feature]))
+            st.caption("K-Means with k = 4 on all training rows. Cancel rate "
+                       "is the reference label, shown for interpretation "
+                       "only: the algorithm never saw it, yet it ranges from "
+                       "8% to 35% across segments.")
+            table_view(profile, "Segment profile table")
+
+    external = load("clustering_external")
+    if external is not None:
+        table_view(external, "External validation against the reference labels")
+    table_view(shown)
+
+
 head, mode = st.columns([6, 1], vertical_alignment="bottom")
 with head:
     st.title("Hotel Booking ML Capstone")
     st.caption("119,390 bookings · predict a nightly rate, score a "
-               "cancellation, and compare fifteen algorithms across three "
+               "cancellation, and compare twenty algorithms across three "
                "tracks")
 with mode:
     st.toggle("Dark mode", key=MODE_KEY)
@@ -604,8 +885,10 @@ with reg:
                                             names=("train", "test")))
             with right, st.container(border=True):
                 st.subheader("Is the accuracy worth the compute?")
-                st.caption("Random Forest buys its lead with ~33x the fit "
-                           "time of Hist Gradient Boosting.")
+                times = models["fit (s)"]
+                st.caption("Random Forest buys its lead with ~"
+                           f"{times['Random Forest'] / times['Hist Gradient Boosting']:.0f}"
+                           "x the fit time of Hist Gradient Boosting.")
                 st.altair_chart(cost_scatter(shown, "R2"))
 
             cv = restrict(load("regression_cv"), chosen)
@@ -687,12 +970,4 @@ with clf:
 
 # ---------------------------------------------------------------- clustering
 with clu:
-  with st.container(border=True):
-    st.subheader("Not built yet")
-    st.write("`notebooks/clustering.ipynb` has no code cells, so there are "
-             "no algorithms to compare. Once it fits a few models, add their "
-             "comparison table to `WANTED` in `scripts/harvest_metrics.py` "
-             "and this tab fills in the same way.")
-    st.caption("Natural shape for the track: K-Means, Agglomerative and "
-               "DBSCAN scored on silhouette, Calinski-Harabasz and "
-               "Davies-Bouldin.")
+    clustering_tab()
