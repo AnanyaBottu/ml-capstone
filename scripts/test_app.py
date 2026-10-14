@@ -232,19 +232,19 @@ for method in app.LINKAGES:
     assert groups == {tuple(range(b, b + 6)) for b in (0, 6, 12)}, groups
 assert app.playground_chart(pts, owner, slots, max(owner), 0).to_dict()
 _, slots, z = app.merge_state(pts, "ward", 5)
-tree = app.dendrogram_chart(z, 5, slots).to_dict()
+tree = app.dendrogram_chart(z, 5, slots, 5).to_dict()
 rows = tree["datasets"][next(iter(tree["datasets"]))]
 assert sum(r["latest"] for r in rows) == 3, "latest merge not marked"
 done = {r["hue"] for r in rows if r["merge"] <= 5}
 assert done == set(slots.values()), f"tree hues {done} != canvas {slots}"
 # the k cut sits between the last merge done and the next one
 for step in (0, 5, len(pts) - 2):
-    spec = app.dendrogram_chart(z, step, {}).to_dict()
+    spec = app.dendrogram_chart(z, 0, {}, step).to_dict()
     cuts = [r["y"] for rows in spec["datasets"].values() for r in rows
             if set(r) == {"y"}]
     below = z[step - 1, 2] if step else 0
     assert len(cuts) == 1 and below < cuts[0] < z[step, 2], (step, cuts)
-assert "layer" not in app.dendrogram_chart(z, len(pts) - 1, {}).to_dict(), \
+assert "layer" not in app.dendrogram_chart(z, 0, {}, len(pts) - 1).to_dict(), \
     "k = 1 should draw no cut"
 print("ok: playground merges step cleanly for every linkage")
 

@@ -6,6 +6,7 @@ notebook outputs); the fitted pipelines come from scripts/train_models.py.
 Nothing is fitted here, so every control is instant.
 """
 import json
+import time
 from pathlib import Path
 
 import altair as alt
@@ -805,11 +806,12 @@ def playground_chart(points, owner, slots, merged, latest):
     return style(cells + spokes + dots, 440)
 
 
-def dendrogram_chart(z, step, slots):
+def dendrogram_chart(z, step, slots, cut_step):
     """The merge tree, drawn from the linkage matrix. Merges already done wear
     the hue of the cluster they now sit in, so the tree matches the canvas;
     the latest is drawn thicker and the ones still to come are faded. The
-    dashed line is where the tree is cut to leave the chosen k clusters."""
+    dashed line is where the tree is cut to leave the chosen k clusters, which
+    is `cut_step` merges in."""
     n = len(z) + 1
     x = {int(leaf): i for i, leaf in enumerate(leaves_list(z))}
     h = dict.fromkeys(range(n), 0.0)
@@ -840,10 +842,10 @@ def dendrogram_chart(z, step, slots):
                                   alt.value(2)),
         tooltip=["merge:Q", alt.Tooltip("y2:Q", format=".2f",
                                         title="distance")])
-    if step == n - 1:  # k = 1: nothing left to cut
+    if cut_step == n - 1:  # k = 1: nothing left to cut
         return style(tree, 440)
-    below = z[step - 1, 2] if step else 0.0
-    cut = alt.Chart(pd.DataFrame({"y": [(below + z[step, 2]) / 2]})).mark_rule(
+    below = z[cut_step - 1, 2] if cut_step else 0.0
+    cut = alt.Chart(pd.DataFrame({"y": [(below + z[cut_step, 2]) / 2]})).mark_rule(
         color=INK, strokeDash=[4, 4]).encode(y="y:Q")
     return style(tree + cut, 440)
 
@@ -856,9 +858,10 @@ def add_clicked(key):
         st.session_state.pg_points.append((round(cx, 2), round(cy, 2)))
         st.session_state.pg_latest = len(st.session_state.pg_points) - 1
         st.session_state.pg_round += 1  # fresh chart key clears the selection
+        st.session_state.pg_step = 0
 
 
-# A fragment reruns on its own, so a click or a slider step redraws these two
+# A fragment reruns on its own, so a click or a button redraws these two
 # charts instead of the whole dashboard.
 @st.fragment
 def clustering_playground():
@@ -866,6 +869,7 @@ def clustering_playground():
     ss = st.session_state
     if "pg_points" not in ss:
         ss.pg_points, ss.pg_latest, ss.pg_round = seed_points(), None, 0
+    ss.setdefault("pg_step", 0)
 
     with st.container(border=True):
         method, reset, clear = st.columns([3, 1, 1],
@@ -874,55 +878,94 @@ def clustering_playground():
                            format_func=LINKAGES.get, horizontal=True,
                            key="pg_linkage")
         if reset.button("Reset points", width="stretch"):
-            ss.pg_points, ss.pg_latest = seed_points(), None
+            ss.pg_points, ss.pg_latest, ss.pg_step = seed_points(), None, 0
             ss.pg_round += 1
         if clear.button("Clear", width="stretch"):
-            ss.pg_points, ss.pg_latest = [], None
+            ss.pg_points, ss.pg_latest, ss.pg_step = [], None, 0
             ss.pg_round += 1
 
         points, n = ss.pg_points, len(ss.pg_points)
         if n < 2:
             st.caption("Click the canvas to add points; two are needed "
                        "before anything can merge.")
-            owner, slots, z, step = list(range(n)), {}, None, 0
-        else:
-            # a new key per edit, so adding a point restarts the replay
-            k = st.slider("Number of clusters (k)", 1, n, n,
-                          key=f"pg_k_{ss.pg_round}",
-                          help="Each step down joins the two closest "
-                          "clusters.")
-            step = n - k
-            owner, slots, z = merge_state(points, how, step)
-
-        merged = n + step - 1 if step else None
-        key = f"pg_click_{ss.pg_round}"
-        canvas, tree = st.columns([3, 2])
-        canvas.altair_chart(playground_chart(points, owner, slots,
-                                             merged, ss.pg_latest),
+            key = f"pg_click_{ss.pg_round}"
+            st.altair_chart(playground_chart(points, list(range(n)), {},
+                                             None, ss.pg_latest),
                             on_select=lambda: add_clicked(key), key=key,
                             selection_mode="click")
-        if z is not None:
-            tree.altair_chart(dendrogram_chart(z, step, slots))
+            return
 
-        if step:
-            a, b, dist, size = z[step - 1]
-            sizes = [1 if c < n else int(z[int(c) - n, 3]) for c in (a, b)]
-            st.caption(f"Merge {step}: a cluster of {sizes[0]} joined one of "
-                       f"{sizes[1]} at distance {dist:.2f}, making "
-                       f"{int(size)} points. {n - step} clusters left.")
-        else:
-            st.caption(f"Every point starts as its own cluster ({n}). Lower "
-                       "k to merge them, or click to add a point.")
+        # pick k first, then walk the merges that get there
+        pick, back, step_on, play, again = st.columns(
+            [2, 1, 1, 1, 1], vertical_alignment="bottom")
+        k = pick.number_input("Clusters to end with (k)", 1, n - 1,
+                              min(3, n - 1), key=f"pg_k_{ss.pg_round}")
+        target = n - k
+        ss.pg_step = min(ss.pg_step, target)
+        # callbacks run before the rerun, so the disabled states are current
+        back.button("Back", width="stretch", disabled=ss.pg_step == 0,
+                    on_click=lambda: ss.update(pg_step=ss.pg_step - 1))
+        step_on.button("Next merge", type="primary", width="stretch",
+                       disabled=ss.pg_step == target,
+                       on_click=lambda: ss.update(pg_step=ss.pg_step + 1))
+        # Play jumps the step to k and remembers where to animate from
+        play.button("Play to k", width="stretch",
+                    disabled=ss.pg_step == target,
+                    on_click=lambda: ss.update(pg_play_from=ss.pg_step,
+                                               pg_step=target))
+        again.button("Start over", width="stretch",
+                     disabled=ss.pg_step == 0,
+                     on_click=lambda: ss.update(pg_step=0))
+
+        canvas, tree = st.columns([3, 2])
+        canvas_box, tree_box, note = canvas.empty(), tree.empty(), st.empty()
+        key = f"pg_click_{ss.pg_round}"
+
+        def draw(step, clickable):
+            owner, slots, z = merge_state(points, how, step)
+            chart = playground_chart(points, owner, slots,
+                                     n + step - 1 if step else None,
+                                     ss.pg_latest)
+            if clickable:
+                canvas_box.altair_chart(chart, key=key, selection_mode="click",
+                                        on_select=lambda: add_clicked(key))
+            else:
+                canvas_box.altair_chart(chart)
+            tree_box.altair_chart(dendrogram_chart(z, step, slots, target))
+            if step:
+                a, b, dist, size = z[step - 1]
+                sizes = [1 if c < n else int(z[int(c) - n, 3])
+                         for c in (a, b)]
+                note.caption(
+                    f"Merge {step} of {target}: a cluster of {sizes[0]} joined "
+                    f"one of {sizes[1]} at distance {dist:.2f}, making "
+                    f"{int(size)} points. {n - step} clusters now"
+                    + (", which is k." if step == target else
+                       f", {target - step} more merges to reach k = {k}."))
+            else:
+                note.caption(f"Every point starts as its own cluster ({n}). "
+                             f"{target} merges bring it down to k = {k}: "
+                             "step through them with Next merge, or Play.")
+
+        start = ss.pop("pg_play_from", None)
+        if start is not None:
+            # ponytail: blocks the fragment while it plays; fine for a few
+            # dozen merges, a timer-driven rerun if anyone plays hundreds
+            for step in range(start + 1, ss.pg_step):
+                draw(step, clickable=False)
+                time.sleep(0.8)
+        draw(ss.pg_step, clickable=True)
+
         st.caption("Each colour is one cluster, grey points are still on "
                    "their own, and lines join each point to its cluster's "
                    "centre. The ringed cluster is the one that just merged; "
                    "the diamond is your latest point. The tree on the right "
                    "is the full merge order in the same colours, tallest "
-                   "joins last and the thick link is the latest; the dashed line "
-                   "cuts it into k clusters. Try Single "
-                   "linkage on a long chain of points: it merges "
-                   "neighbour by neighbour, the same chaining that made it "
-                   "degenerate on the booking data.")
+                   "joins last and the thick link is the latest; the dashed "
+                   "line cuts it into k clusters. Try Single linkage on a "
+                   "long chain of points: it merges neighbour by neighbour, "
+                   "the same chaining that made it degenerate on the "
+                   "booking data.")
 
 
 def clustering_tab():
