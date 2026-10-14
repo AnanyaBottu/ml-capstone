@@ -41,13 +41,23 @@ assert app.cost_scatter(clf, "f1_weighted").to_dict()
 assert app.cv_bars(cv, "CV mean R2", "CV std").to_dict()
 assert app.cv_bars(clf_cv, "CV mean F1", "CV std").to_dict()
 
-# the cost scatter uses a log x-axis, which dies on a non-positive fit time
+# the cost scatter uses a log x-axis, which dies on a non-positive fit time;
+# Part B has no comparable timing, so only the timed rows are plotted
 for name, df in [("regression", reg), ("classification", clf)]:
-    assert (df["fit (s)"] > 0).all(), f"{name} has a non-positive fit time"
+    timed = df["fit (s)"].dropna()
+    assert len(timed) >= 5 and (timed > 0).all(), f"{name} fit times broken"
+assert app.cost_scatter(clf.dropna(subset=["fit (s)"]), "f1_weighted").to_dict()
+
+# Part A and Part B together, and not the tuned-candidates table that shares
+# its columns (whose names carry "(Baseline)" / "(Tuned)")
+assert len(clf) == 10, f"classification has {len(clf)} models, expected 10"
+assert not clf.index.str.contains(r"\(").any(), clf.index.tolist()
+assert app.load("classification_cv_b").index.tolist() == ["Bagging",
+                                                          "Random Forest"]
 
 # the winner picked for the stat row must be the actual best, not row order
 assert reg["R2"].idxmax() == "Random Forest", reg["R2"].idxmax()
-assert clf["f1_weighted"].idxmax() == "Decision Tree", clf["f1_weighted"].idxmax()
+assert clf["f1_weighted"].idxmax() == "Bagging", clf["f1_weighted"].idxmax()
 
 print(f"ok: {len(reg)} regression + {len(clf)} classification models, "
       "all chart specs compile")

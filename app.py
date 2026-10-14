@@ -90,6 +90,9 @@ FAMILY = {
     "Decision Tree": "Tree & ensemble",
     "Random Forest": "Tree & ensemble",
     "Hist Gradient Boosting": "Tree & ensemble",
+    "Gradient Boosting": "Tree & ensemble",
+    "Bagging": "Tree & ensemble",
+    "AdaBoost": "Tree & ensemble",
     # the two notebooks spell the neighbours model differently
     "K-Nearest Neighbours": "Instance & kernel",
     "K-Nearest Neighbors": "Instance & kernel",
@@ -1133,7 +1136,7 @@ with clf:
     else:
         if timing is not None:
             models = models.join(timing[["fit (s)", "train rows"]])
-        st.header("How the five algorithms compared")
+        st.header("How the ten algorithms compared")
         with st.container(border=True):
             leaderboard(models, "f1_weighted", True,
                         ["accuracy", "f1_weighted", "roc_auc"])
@@ -1151,12 +1154,22 @@ with clf:
                 st.caption("Higher is better for all five.")
                 st.altair_chart(ranked_bars(shown, metric, True, ".3f"))
 
-            if "fit (s)" in shown:
+            # Part B fit times were measured on another machine, so only
+            # Part A's five are placed on one time axis.
+            timed = (shown.dropna(subset=["fit (s)"]) if "fit (s)" in shown
+                     else shown.iloc[:0])
+            if not timed.empty:
                 with st.container(border=True):
                     st.subheader("Is the accuracy worth the compute?")
-                    st.altair_chart(cost_scatter(shown, metric))
+                    st.altair_chart(cost_scatter(timed, metric))
+                    st.caption("Part A's five models only: Part B was timed "
+                               "on a different machine, so its fit times "
+                               "are not comparable.")
 
-            cv = restrict(load("classification_cv"), chosen)
+            cv_parts = [c[["CV mean F1", "CV std"]] for c in
+                        (load("classification_cv"), load("classification_cv_b"))
+                        if c is not None]
+            cv = restrict(pd.concat(cv_parts), chosen) if cv_parts else None
             if cv is not None:
                 with st.container(border=True):
                     st.subheader("Cross-validation")

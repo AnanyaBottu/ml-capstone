@@ -1,0 +1,3 @@
+model,CV Fold 1 F1,CV Fold 2 F1,CV Fold 3 F1,CV mean F1,CV std
+Bagging,0.8396,0.8394,0.8405,0.8398,0.0004
+Random Forest,0.839,0.8386,0.8383,0.8386,0.0003

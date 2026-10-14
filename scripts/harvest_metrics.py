@@ -21,9 +21,10 @@ WANTED = {
     "regression_models":     ("regression",     {"R2", "RMSE", "MAE", "fit (s)"}, "model"),
     "regression_cv":         ("regression",     {"CV mean R2", "CV std"}, "model"),
     "regression_tuning":     ("regression",     {"default R2", "tuned R2"}, "model"),
-    "classification_models": ("classification", {"accuracy", "precision_weighted", "roc_auc"}, "model"),
+    "classification_models": ("classification", {"Model", "Weighted F1", "ROC-AUC"}, "model"),
     "classification_timing": ("classification", {"accuracy", "f1_weighted", "fit (s)"}, "model"),
     "classification_cv":     ("classification", {"CV mean F1", "CV std"}, "model"),
+    "classification_cv_b":   ("classification", {"Mean CV Weighted F1", "Std CV Weighted F1"}, "model"),
     "classification_repr":   ("classification", {"n_features", "f1_weighted"}, "representation"),
     "clustering_models":     ("clustering", {"Silhouette", "Davies-Bouldin", "smallest cluster %"}, "model"),
     "clustering_kmeans_k":   ("clustering", {"inertia", "silhouette", "davies_bouldin"}, "k"),
@@ -33,6 +34,20 @@ WANTED = {
     "clustering_shares":     ("clustering", {"train %", "hold-out %"}, "cluster"),
     "clustering_profile":    ("clustering", {"share_%", "cancel_rate", "top segment"}, "cluster"),
     "clustering_external":   ("clustering", {"ARI vs is_canceled", "NMI vs is_canceled"}, "model"),
+}
+
+
+# Tables whose notebook layout differs from what the app reads: the column
+# holding the model names (None if it is already the index) and new column
+# names. The ten-model table is matched before the tuned-candidates table with
+# the same columns because it comes first in the notebook.
+RESHAPE = {
+    "classification_models": ("Model", {
+        "Accuracy": "accuracy", "Precision": "precision_weighted",
+        "Recall": "recall_weighted", "Weighted F1": "f1_weighted",
+        "ROC-AUC": "roc_auc"}),
+    "classification_cv_b": (None, {"Mean CV Weighted F1": "CV mean F1",
+                                   "Std CV Weighted F1": "CV std"}),
 }
 
 
@@ -85,6 +100,11 @@ def main():
             if match is None:
                 print(f"MISS   {name}: no table with columns {sorted(signature)}")
                 continue
+            if name in RESHAPE:
+                index_col, names = RESHAPE[name]
+                if index_col:
+                    match = match.set_index(index_col)
+                match = match.rename(columns=names)
             match = match.apply(numeric)
             match.index.name = index_name
             match.to_csv(OUT / f"{name}.csv")
