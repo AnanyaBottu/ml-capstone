@@ -2,6 +2,8 @@
 
 23CSE301 Machine Learning capstone, Team 21. One dataset, three tracks: predict a booking's nightly rate (regression), predict whether it will be cancelled (classification), and find customer segments without labels (clustering). A Streamlit dashboard serves the trained models.
 
+**Live dashboard:** https://ml-capstone.streamlit.app/
+
 | Member | Roll no. | Primary track |
 |---|---|---|
 | Ananya Bottu | CB.SC.U4CSE24408 | Regression, dashboard |
@@ -159,6 +161,7 @@ pip install -r requirements.txt -r requirements-dev.txt
    streamlit run app.py
    ```
    The dashboard has one tab per track: enter a booking to get a predicted rate or cancellation probability, and compare how every algorithm scored.
+   The Clustering tab opens with a playground: click to add points, then step through agglomerative merges one at a time, with each cluster in its own colour and a dendrogram showing the merge order.
 4. **Optional, rebuild the artefacts** after changing a notebook:
    ```bash
    python scripts/harvest_metrics.py   # refresh models/*.csv from notebook outputs
