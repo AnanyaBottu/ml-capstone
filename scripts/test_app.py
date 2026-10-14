@@ -197,4 +197,25 @@ for feature, fmt in app.SEGMENT_FEATURES.items():
     assert app.segment_bars(profile, feature, fmt).to_dict()
 print("ok: clustering tables load and every clustering chart compiles")
 
+
+# ---- playground: merges mint new ids and end in one cluster ----------------
+pts = app.seed_points()
+for method in app.LINKAGES:
+    owner, z = app.merge_state(pts, method, 0)
+    assert owner == list(range(len(pts))), "step 0 must leave every point alone"
+    owner, _ = app.merge_state(pts, method, 1)
+    assert len(set(owner)) == len(pts) - 1 and max(owner) == len(pts), owner
+    owner, _ = app.merge_state(pts, method, len(pts) - 1)
+    assert len(set(owner)) == 1, f"{method}: did not end in one cluster"
+    # the seeded blobs are well separated, so three clusters recover them
+    owner, _ = app.merge_state(pts, method, len(pts) - 3)
+    groups = {tuple(i for i, o in enumerate(owner) if o == c) for c in owner}
+    assert groups == {tuple(range(b, b + 6)) for b in (0, 6, 12)}, groups
+assert app.playground_chart(pts, owner, max(owner), 0).to_dict()
+_, z = app.merge_state(pts, "ward", 0)
+tree = app.dendrogram_chart(z, 5).to_dict()
+states = [r["state"] for r in tree["datasets"][next(iter(tree["datasets"]))]]
+assert states.count("just merged") == 3 and states.count("merged") == 12, states
+print("ok: playground merges step cleanly for every linkage")
+
 print("ok: all checks passed")

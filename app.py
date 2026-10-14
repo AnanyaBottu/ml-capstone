@@ -13,6 +13,7 @@ import joblib
 import numpy as np
 import pandas as pd
 import streamlit as st
+from scipy.cluster.hierarchy import leaves_list, linkage
 from streamlit import config as st_config
 
 from sklearn.metrics import (accuracy_score, confusion_matrix, f1_score,
@@ -705,6 +706,166 @@ SEGMENT_FEATURES = {"share_%": ".1f", "cancel_rate": ".0%", "adr": ".0f",
                     "special_requests": ".2f", "parking": ".0%"}
 
 
+# ------------------------------------------------------- clustering playground
+# A toy 2D canvas: click to drop points, then step through agglomerative
+# merges one at a time. Membership is drawn as spokes to each cluster's centre
+# rather than one hue per cluster, because a dozen live clusters would need a
+# dozen hues and only three of ours survive the colourblind check.
+PG_SIZE, PG_CELL = 10, 0.25
+PG_ROLES = ["cluster", "just merged", "your latest point"]
+LINKAGES = {"ward": "Ward", "complete": "Complete", "average": "Average",
+            "single": "Single"}
+
+
+def seed_points():
+    rng = np.random.default_rng(7)
+    centres = [(2.5, 7), (7, 7.5), (5, 2.5)]
+    return [tuple(rng.normal(c, 0.7).clip(0.3, PG_SIZE - 0.3).round(2))
+            for c in centres for _ in range(6)]
+
+
+def merge_state(points, method, step):
+    """Cluster id of every point after `step` merges. Ids are scipy's node
+    numbers, so a merge mints a new id and leaves the others untouched.
+    Returns (owner, linkage matrix)."""
+    n = len(points)
+    z = linkage(np.asarray(points), method)
+    owner = list(range(n))
+    for i in range(step):
+        a, b = int(z[i, 0]), int(z[i, 1])
+        owner = [n + i if o in (a, b) else o for o in owner]
+    return owner, z
+
+
+def playground_chart(points, owner, merged, latest):
+    d = pd.DataFrame(points, columns=["x", "y"])
+    d["cluster"] = owner
+    d["role"] = "cluster"
+    d.loc[d["cluster"] == merged, "role"] = "just merged"
+    if latest is not None:
+        d.loc[latest, "role"] = "your latest point"
+    centres = d.groupby("cluster")[["x", "y"]].transform("mean")
+    d["cx"], d["cy"] = centres["x"], centres["y"]
+    axis = dict(scale=alt.Scale(domain=[0, PG_SIZE], nice=False), title=None)
+
+    # invisible cells catch the clicks that add a point
+    g = np.arange(0, PG_SIZE, PG_CELL)
+    gx, gy = np.meshgrid(g, g)
+    grid = pd.DataFrame({"gx": gx.ravel(), "gy": gy.ravel()})
+    grid["gx2"], grid["gy2"] = grid["gx"] + PG_CELL, grid["gy"] + PG_CELL
+    click = alt.selection_point(name="click", fields=["gx", "gy"],
+                                on="click", clear=False)
+    cells = alt.Chart(grid).mark_rect(opacity=0.001).encode(
+        x=alt.X("gx:Q", **axis), x2="gx2", y=alt.Y("gy:Q", **axis),
+        y2="gy2").add_params(click)
+
+    spokes = alt.Chart(d).mark_rule(color=MUTED, strokeWidth=1,
+                                    opacity=0.5).encode(
+        x="x:Q", y="y:Q", x2="cx", y2="cy")
+    dots = alt.Chart(d).mark_point(filled=True, size=110, stroke=SURFACE,
+                                   strokeWidth=2, opacity=1).encode(
+        x="x:Q", y="y:Q",
+        color=alt.Color("role:N", title=None, scale=alt.Scale(
+            domain=PG_ROLES, range=[BLUE, ORANGE, AQUA])),
+        tooltip=[alt.Tooltip("x:Q", format=".2f"),
+                 alt.Tooltip("y:Q", format=".2f"), "role:N"])
+    return style(cells + spokes + dots, 440)
+
+
+def dendrogram_chart(z, step):
+    """The merge tree, drawn from the linkage matrix: merges already done in
+    blue, the latest in orange, the ones still to come faded."""
+    n = len(z) + 1
+    x = {int(leaf): i for i, leaf in enumerate(leaves_list(z))}
+    h = dict.fromkeys(range(n), 0.0)
+    rows = []
+    for i, (a, b, dist, _) in enumerate(z):
+        a, b, node = int(a), int(b), n + i
+        x[node], h[node] = (x[a] + x[b]) / 2, dist
+        state = ("still to come" if i >= step else
+                 "just merged" if i == step - 1 else "merged")
+        rows += [(x[a], h[a], x[a], dist, state, i + 1),
+                 (x[b], h[b], x[b], dist, state, i + 1),
+                 (x[a], dist, x[b], dist, state, i + 1)]
+    d = pd.DataFrame(rows, columns=["x", "y", "x2", "y2", "state", "merge"])
+    return style(alt.Chart(d).mark_rule(strokeWidth=2).encode(
+        x=alt.X("x:Q", title=None, axis=None), x2="x2",
+        y=alt.Y("y:Q", title="Merge distance"), y2="y2",
+        color=alt.Color("state:N", title=None, scale=alt.Scale(
+            domain=["merged", "just merged", "still to come"],
+            range=[BLUE, ORANGE, GRID])),
+        tooltip=["merge:Q", alt.Tooltip("y2:Q", format=".2f",
+                                        title="distance")]), 440)
+
+
+def add_clicked(key):
+    hit = st.session_state[key]["selection"].get("click") or []
+    if hit:
+        cx = hit[0]["gx"] + PG_CELL / 2
+        cy = hit[0]["gy"] + PG_CELL / 2
+        st.session_state.pg_points.append((round(cx, 2), round(cy, 2)))
+        st.session_state.pg_latest = len(st.session_state.pg_points) - 1
+        st.session_state.pg_round += 1  # fresh chart key clears the selection
+
+
+def clustering_playground():
+    st.header("Watch clusters form")
+    ss = st.session_state
+    if "pg_points" not in ss:
+        ss.pg_points, ss.pg_latest, ss.pg_round = seed_points(), None, 0
+
+    with st.container(border=True):
+        method, reset, clear = st.columns([3, 1, 1],
+                                          vertical_alignment="bottom")
+        how = method.radio("Linkage", list(LINKAGES),
+                           format_func=LINKAGES.get, horizontal=True,
+                           key="pg_linkage")
+        if reset.button("Reset points", width="stretch"):
+            ss.pg_points, ss.pg_latest = seed_points(), None
+            ss.pg_round += 1
+        if clear.button("Clear", width="stretch"):
+            ss.pg_points, ss.pg_latest = [], None
+            ss.pg_round += 1
+
+        points, n = ss.pg_points, len(ss.pg_points)
+        if n < 2:
+            st.caption("Click the canvas to add points; two are needed "
+                       "before anything can merge.")
+            owner, z, step = list(range(n)), None, 0
+        else:
+            # a new key per edit, so adding a point restarts the replay
+            step = st.slider("Merges done", 0, n - 1, 0,
+                             key=f"pg_step_{ss.pg_round}",
+                             help="Each step joins the two closest clusters.")
+            owner, z = merge_state(points, how, step)
+
+        merged = n + step - 1 if step else None
+        key = f"pg_click_{ss.pg_round}"
+        canvas, tree = st.columns([3, 2])
+        canvas.altair_chart(playground_chart(points, owner, merged,
+                                             ss.pg_latest),
+                            on_select=lambda: add_clicked(key), key=key,
+                            selection_mode="click")
+        if z is not None:
+            tree.altair_chart(dendrogram_chart(z, step))
+
+        if step:
+            a, b, dist, size = z[step - 1]
+            sizes = [1 if c < n else int(z[int(c) - n, 3]) for c in (a, b)]
+            st.caption(f"Merge {step}: a cluster of {sizes[0]} joined one of "
+                       f"{sizes[1]} at distance {dist:.2f}, making "
+                       f"{int(size)} points. {n - step} clusters left.")
+        else:
+            st.caption(f"Every point starts as its own cluster ({n}). Drag "
+                       "the slider to merge them, or click to add a point.")
+        st.caption("Lines join each point to its cluster's centre; the tree "
+                   "on the right is the full merge order, tallest joins "
+                   "last. Try "
+                   "Single linkage on a long chain of points: it merges "
+                   "neighbour by neighbour, the same chaining that made it "
+                   "degenerate on the booking data.")
+
+
 def clustering_tab():
     models = cluster_models()
     if models is None:
@@ -829,6 +990,8 @@ def clustering_tab():
     if external is not None:
         table_view(external, "External validation against the reference labels")
     table_view(shown)
+
+    clustering_playground()
 
 
 head, mode = st.columns([6, 1], vertical_alignment="bottom")
