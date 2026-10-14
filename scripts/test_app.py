@@ -201,21 +201,32 @@ print("ok: clustering tables load and every clustering chart compiles")
 # ---- playground: merges mint new ids and end in one cluster ----------------
 pts = app.seed_points()
 for method in app.LINKAGES:
-    owner, z = app.merge_state(pts, method, 0)
+    owner, slots, z = app.merge_state(pts, method, 0)
     assert owner == list(range(len(pts))), "step 0 must leave every point alone"
-    owner, _ = app.merge_state(pts, method, 1)
+    owner, slots, _ = app.merge_state(pts, method, 1)
+    assert slots == {len(pts): 0}, "the first pair should take the first hue"
     assert len(set(owner)) == len(pts) - 1 and max(owner) == len(pts), owner
-    owner, _ = app.merge_state(pts, method, len(pts) - 1)
+    owner, slots, _ = app.merge_state(pts, method, len(pts) - 1)
     assert len(set(owner)) == 1, f"{method}: did not end in one cluster"
     # the seeded blobs are well separated, so three clusters recover them
-    owner, _ = app.merge_state(pts, method, len(pts) - 3)
+    owner, slots, _ = app.merge_state(pts, method, len(pts) - 3)
+    assert set(slots) == set(owner) and len(set(slots.values())) == 3, slots
+    # a hue follows its cluster: every step keeps the surviving bigger half's
+    for step in range(1, len(pts)):
+        before = app.merge_state(pts, method, step - 1)[1]
+        after = app.merge_state(pts, method, step)[1]
+        assert len(set(after.values())) == len(after), f"{method}: shared hue"
+        assert all(after.get(c, v) == v for c, v in before.items()), \
+            f"{method}: step {step} repainted a cluster it did not touch"
     groups = {tuple(i for i, o in enumerate(owner) if o == c) for c in owner}
     assert groups == {tuple(range(b, b + 6)) for b in (0, 6, 12)}, groups
-assert app.playground_chart(pts, owner, max(owner), 0).to_dict()
-_, z = app.merge_state(pts, "ward", 0)
-tree = app.dendrogram_chart(z, 5).to_dict()
-states = [r["state"] for r in tree["datasets"][next(iter(tree["datasets"]))]]
-assert states.count("just merged") == 3 and states.count("merged") == 12, states
+assert app.playground_chart(pts, owner, slots, max(owner), 0).to_dict()
+_, slots, z = app.merge_state(pts, "ward", 5)
+tree = app.dendrogram_chart(z, 5, slots).to_dict()
+rows = tree["datasets"][next(iter(tree["datasets"]))]
+assert sum(r["latest"] for r in rows) == 3, "latest merge not marked"
+done = {r["hue"] for r in rows if r["merge"] <= 5}
+assert done == set(slots.values()), f"tree hues {done} != canvas {slots}"
 print("ok: playground merges step cleanly for every linkage")
 
 print("ok: all checks passed")
