@@ -808,7 +808,8 @@ def playground_chart(points, owner, slots, merged, latest):
 def dendrogram_chart(z, step, slots):
     """The merge tree, drawn from the linkage matrix. Merges already done wear
     the hue of the cluster they now sit in, so the tree matches the canvas;
-    the latest is drawn thicker and the ones still to come are faded."""
+    the latest is drawn thicker and the ones still to come are faded. The
+    dashed line is where the tree is cut to leave the chosen k clusters."""
     n = len(z) + 1
     x = {int(leaf): i for i, leaf in enumerate(leaves_list(z))}
     h = dict.fromkeys(range(n), 0.0)
@@ -829,7 +830,7 @@ def dendrogram_chart(z, step, slots):
                  (x[a], dist, x[b], dist, hue, i + 1)]
     d = pd.DataFrame(rows, columns=["x", "y", "x2", "y2", "hue", "merge"])
     d["latest"] = d["merge"] == step
-    return style(alt.Chart(d).mark_rule().encode(
+    tree = alt.Chart(d).mark_rule().encode(
         x=alt.X("x:Q", title=None, axis=None), x2="x2",
         y=alt.Y("y:Q", title="Merge distance"), y2="y2",
         color=alt.Color("hue:N", legend=None, scale=alt.Scale(
@@ -838,7 +839,13 @@ def dendrogram_chart(z, step, slots):
         strokeWidth=alt.condition(alt.datum.latest, alt.value(4),
                                   alt.value(2)),
         tooltip=["merge:Q", alt.Tooltip("y2:Q", format=".2f",
-                                        title="distance")]), 440)
+                                        title="distance")])
+    if step == n - 1:  # k = 1: nothing left to cut
+        return style(tree, 440)
+    below = z[step - 1, 2] if step else 0.0
+    cut = alt.Chart(pd.DataFrame({"y": [(below + z[step, 2]) / 2]})).mark_rule(
+        color=INK, strokeDash=[4, 4]).encode(y="y:Q")
+    return style(tree + cut, 440)
 
 
 def add_clicked(key):
@@ -880,9 +887,11 @@ def clustering_playground():
             owner, slots, z, step = list(range(n)), {}, None, 0
         else:
             # a new key per edit, so adding a point restarts the replay
-            step = st.slider("Merges done", 0, n - 1, 0,
-                             key=f"pg_step_{ss.pg_round}",
-                             help="Each step joins the two closest clusters.")
+            k = st.slider("Number of clusters (k)", 1, n, n,
+                          key=f"pg_k_{ss.pg_round}",
+                          help="Each step down joins the two closest "
+                          "clusters.")
+            step = n - k
             owner, slots, z = merge_state(points, how, step)
 
         merged = n + step - 1 if step else None
@@ -902,14 +911,15 @@ def clustering_playground():
                        f"{sizes[1]} at distance {dist:.2f}, making "
                        f"{int(size)} points. {n - step} clusters left.")
         else:
-            st.caption(f"Every point starts as its own cluster ({n}). Drag "
-                       "the slider to merge them, or click to add a point.")
+            st.caption(f"Every point starts as its own cluster ({n}). Lower "
+                       "k to merge them, or click to add a point.")
         st.caption("Each colour is one cluster, grey points are still on "
                    "their own, and lines join each point to its cluster's "
                    "centre. The ringed cluster is the one that just merged; "
                    "the diamond is your latest point. The tree on the right "
                    "is the full merge order in the same colours, tallest "
-                   "joins last and the thick link is the latest. Try Single "
+                   "joins last and the thick link is the latest; the dashed line "
+                   "cuts it into k clusters. Try Single "
                    "linkage on a long chain of points: it merges "
                    "neighbour by neighbour, the same chaining that made it "
                    "degenerate on the booking data.")
